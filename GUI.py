@@ -1,11 +1,12 @@
 import asyncio
 import tkinter as tk
 from tkinter import ttk
-from PIL import ImageTk
+from PIL import ImageTk,ImageDraw
 from av import VideoFrame
 from util import *
 from conf_client import ConferenceClient
-
+from VideoManager import VideoGridManager
+from time import time
 class LoginFrame(ttk.Frame):
     pass
 
@@ -14,6 +15,15 @@ class ConferenceListFrame(ttk.Frame):
 
 class ConferenceFrame(ttk.Frame):
     pass
+
+def create_empty_frame():
+        """创建空的视频框架"""
+        # 创建一个灰色背景的图像
+        img = Image.new('RGB', (320, 240), color='gray')
+        # 在图像上添加文本
+        draw = ImageDraw.Draw(img)
+        draw.text((160, 120), "无视频", fill='white', anchor='mm')
+        return img
 class ConferenceGUI(tk.Tk):
     def __init__(self, server_url, loop):
         super().__init__()
@@ -219,40 +229,37 @@ class CreateConferenceDialog(tk.Toplevel):
     def on_cancel(self):
         self.result = None
         self.destroy()
-
-
 class ConferenceFrame(ttk.Frame):
     def __init__(self, master, client):
         super().__init__(master)
         self.client = client
         self.conference = client.conference
         self.master.title(f"会议: {self.conference.name}")
-        self.master.geometry("800x650")
+        self.master.geometry("800x800")
 
         # 初始化状态变量
         self.is_sending_audio = False
         self.is_sending_video = False
         self.is_sharing_screen = False
+
+        # 帧率控制
+        self.last_frame_time = {}
+        self.frame_interval = 1.0 / 30  # 30 FPS
+
         # 添加任务队列和控制变量
-        self.video_queue = asyncio.Queue(maxsize=3)  # 限制队列大小
+        self.video_queue = asyncio.Queue(maxsize=3)
         self.screen_queue = asyncio.Queue(maxsize=2)
         self.audio_queue = asyncio.Queue(maxsize=5)
-        self.video_frames = {}
 
+        # 创建视频管理器
+        self.video_manager = VideoGridManager(self)
+
+        # 初始化界面和功能
         self.start_processing_tasks()
-        # 设置事件监听
         self.setup_event_handlers()
-
-        # 创建布局
         self.create_layout()
-
-        # 更新参与者列表
         self.update_participant_list()
-    def start_processing_tasks(self):
-        # 启动异步处理任务
-        self.master.loop.create_task(self.process_video_queue())
-        self.master.loop.create_task(self.process_screen_queue())
-        self.master.loop.create_task(self.process_audio_queue())
+
     def setup_event_handlers(self):
         # 设置音频、视频和屏幕共享的事件处理
         self.client.sio.on('audio', self.on_audio_received)
@@ -263,7 +270,7 @@ class ConferenceFrame(ttk.Frame):
         self.client.sio.on('participant_joined', self.on_participant_joined)
         self.client.sio.on('participant_left', self.on_participant_left)
         self.client.sio.on('message_received', self.on_message_received)
-    
+
     def create_layout(self):
         # 创建主框架
         main_frame = ttk.Frame(self)
@@ -275,7 +282,7 @@ class ConferenceFrame(ttk.Frame):
         
         # 创建控制面板
         self.create_control_panel(right_frame)
-    
+
     def create_left_frame(self, parent):
         left_frame = ttk.Frame(parent)
         left_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
@@ -298,7 +305,7 @@ class ConferenceFrame(ttk.Frame):
 
         # 离开会议按钮
         leave_button = ttk.Button(right_frame, text="离开会议", 
-                                 command=self.leave_conference_clicked)
+                                command=self.leave_conference_clicked)
         leave_button.pack(fill=tk.X)
 
         return right_frame
@@ -350,13 +357,18 @@ class ConferenceFrame(ttk.Frame):
         ttk.Checkbutton(control_frame, text="共享屏幕", 
                         variable=self.screen_share_var,
                         command=self.toggle_screen_share).pack(side=tk.LEFT, padx=5)
-    
+
+    def start_processing_tasks(self):
+        # 启动异步处理任务
+        self.master.loop.create_task(self.process_video_queue())
+        self.master.loop.create_task(self.process_screen_queue())
+        self.master.loop.create_task(self.process_audio_queue())
+
+    # 事件处理方法
     def on_participant_joined(self, data):
-        if data['conference_id'] == self.conference.id:  # 确保是当前会议
+        if data['conference_id'] == self.conference.id:
             print(f"New participant joined: {data['client_name']}")
-            # 更新会议对象中的参与者信息
             self.conference.participants[data['client_id']] = data['client_name']
-            # 更新GUI
             self.update_participant_list()
 
     def on_participant_left(self, data):
@@ -364,6 +376,7 @@ class ConferenceFrame(ttk.Frame):
             print(f"Participant left: {data['client_name']}")
             if data['client_id'] in self.conference.participants:
                 del self.conference.participants[data['client_id']]
+            self.video_manager.remove_video(data['client_id'])
             self.update_participant_list()
 
     def on_message_received(self, data):
@@ -371,16 +384,41 @@ class ConferenceFrame(ttk.Frame):
         message = data['message']
         self.insert_message(f"{sender}: {message}")
 
-    def on_video_frame(self, participant_id, video_frame: VideoFrame):
-        image = video_frame.to_image()
-        photo = ImageTk.PhotoImage(image)
-        if participant_id not in self.video_frames:
-            label = tk.Label(self.video_panel)
-            label.pack()
-            self.video_frames[participant_id] = label
-        self.video_frames[participant_id].config(image=photo)
-        self.video_frames[participant_id].image = photo
+    async def on_video_received(self, data):
+        try:
+            if 'data' in data:
+                frame = decompress_image(data['data'])
+                participant_id = data.get('participant_id', 'remote')
+                
+                # 帧率控制
+                current_time = time.time()
+                last_time = self.last_frame_time.get(participant_id, 0)
+                if current_time - last_time >= self.frame_interval:
+                    self.video_manager.update_video(participant_id, frame)
+                    self.last_frame_time[participant_id] = current_time
+        except Exception as e:
+            print(f"Error displaying received video: {e}")
 
+    async def on_screen_share_received(self, data):
+        try:
+            if 'data' in data:
+                screen = decompress_image(data['data'])
+                current_time = time.time()
+                last_time = self.last_frame_time.get('screen', 0)
+                if current_time - last_time >= self.frame_interval:
+                    self.video_manager.update_screen_share(screen)
+                    self.last_frame_time['screen'] = current_time
+        except Exception as e:
+            print(f"Error displaying received screen share: {e}")
+
+    async def on_audio_received(self, data):
+        try:
+            if 'data' in data:
+                streamout.write(data['data'])
+        except Exception as e:
+            print(f"Error playing received audio: {e}")
+
+    # UI 更新方法
     def update_participant_list(self):
         self.participant_list.delete(0, tk.END)
         for participant_id, name in self.conference.participants.items():
@@ -392,63 +430,43 @@ class ConferenceFrame(ttk.Frame):
         self.chat_text.configure(state=tk.DISABLED)
         self.chat_text.see(tk.END)
 
+    # 消息发送
     def send_message(self):
         message = self.chat_input.get()
         if message:
-            # 假设 client.send_message 是异步的
             self.master.loop.create_task(self._send_message_async(message))
 
     async def _send_message_async(self, message):
         await self.client.send_message(message)
         self.chat_input.delete(0, tk.END)
 
-    def leave_conference_clicked(self):
-        self.master.loop.create_task(self.leave_conference())
-
-    async def leave_conference(self):
-        await self.client.leave_conference()
-        self.master.switch_frame(ConferenceListFrame)
-
+    # 音视频控制方法
     def toggle_mic(self):
         if self.mic_var.get():
             self.master.loop.create_task(self.start_audio())
         else:
             self.stop_audio()
 
-    def toggle_camera(self):
-        if self.camera_var.get():
-            self.master.loop.create_task(self.start_video())
-        else:
-            self.stop_video()
-
-    def toggle_screen_share(self):
-        if self.screen_share_var.get():
-            self.master.loop.create_task(self.start_screen_share())
-        else:
-            self.stop_screen_share()
     
-    def toggle_mic(self):
-        print("Toggle microphone:", self.mic_var.get())  # 添加日志
-        if self.mic_var.get():
-            self.master.loop.create_task(self.start_audio())
-        else:
-            self.stop_audio()
 
     def toggle_camera(self):
-        print("Toggle camera:", self.camera_var.get())  # 添加日志
         if self.camera_var.get():
+            # 开启摄像头前先添加空面板
+            self.video_manager.add_video('local', create_empty_frame())
             self.master.loop.create_task(self.start_video())
         else:
             self.stop_video()
+            # 停止视频后显示空面板
+            self.video_manager.update_video('local', create_empty_frame())
+
 
     def toggle_screen_share(self):
-        print("Toggle screen share:", self.screen_share_var.get())  # 添加日志
         if self.screen_share_var.get():
             self.master.loop.create_task(self.start_screen_share())
         else:
             self.stop_screen_share()
 
-    # 完善音视频和屏幕共享的方法
+    # 音视频流处理
     async def start_video(self):
         print("Starting video stream...")
         self.is_sending_video = True
@@ -456,37 +474,35 @@ class ConferenceFrame(ttk.Frame):
             try:
                 frame = capture_camera()
                 if frame and not self.video_queue.full():
+                    # 确保图像大小合适
+                    frame = frame.resize((320, 240), Image.LANCZOS)
                     compressed_frame = compress_image(frame)
                     await self.video_queue.put(compressed_frame)
                     # 更新本地预览
-                    photo = ImageTk.PhotoImage(frame)
-                    if 'local' not in self.video_frames:
-                        label = tk.Label(self.video_panel)
-                        label.pack(side=tk.LEFT)
-                        self.video_frames['local'] = label
-                    self.video_frames['local'].config(image=photo)
-                    self.video_frames['local'].image = photo
+                    self.video_manager.update_video('local', frame)
             except asyncio.QueueFull:
-                # 队列满了，跳过这一帧
                 pass
             except Exception as e:
                 print(f"Error in video streaming: {e}")
-            await asyncio.sleep(0.033)  # 控制捕获帧率
+            await asyncio.sleep(self.frame_interval)
 
     async def start_screen_share(self):
         print("Starting screen share...")
         self.is_sharing_screen = True
+        self.video_manager.start_screen_share()
         while self.is_sharing_screen:
             try:
                 screen = capture_screen()
                 if screen and not self.screen_queue.full():
                     compressed_screen = compress_image(screen)
                     await self.screen_queue.put(compressed_screen)
+                    # 更新本地预览
+                    self.video_manager.update_screen_share(screen)
             except asyncio.QueueFull:
                 pass
             except Exception as e:
                 print(f"Error in screen sharing: {e}")
-            await asyncio.sleep(0.05)
+            await asyncio.sleep(self.frame_interval)
 
     async def start_audio(self):
         print("Starting audio stream...")
@@ -502,45 +518,6 @@ class ConferenceFrame(ttk.Frame):
                 print(f"Error in audio streaming: {e}")
             await asyncio.sleep(0.02)
 
-    # 添加接收处理方法
-    async def on_video_received(self, data):
-        try:
-            if 'data' in data:
-                frame = decompress_image(data['data'])
-                participant_id = data.get('participant_id', 'remote')
-                # 在GUI中显示视频
-                photo = ImageTk.PhotoImage(frame)
-                if participant_id not in self.video_frames:
-                    label = tk.Label(self.video_panel)
-                    label.pack(side=tk.LEFT)
-                    self.video_frames[participant_id] = label
-                self.video_frames[participant_id].config(image=photo)
-                self.video_frames[participant_id].image = photo
-        except Exception as e:
-            print(f"Error displaying received video: {e}")
-
-    async def on_screen_share_received(self, data):
-        try:
-            if 'data' in data:
-                screen = decompress_image(data['data'])
-                # 在GUI中显示共享屏幕
-                photo = ImageTk.PhotoImage(screen)
-                if 'screen' not in self.video_frames:
-                    label = tk.Label(self.video_panel)
-                    label.pack(fill=tk.BOTH, expand=True)
-                    self.video_frames['screen'] = label
-                self.video_frames['screen'].config(image=photo)
-                self.video_frames['screen'].image = photo
-        except Exception as e:
-            print(f"Error displaying received screen share: {e}")
-
-    async def on_audio_received(self, data):
-        try:
-            if 'data' in data:
-                streamout.write(data['data'])  # 使用 util.py 中定义的 streamout
-        except Exception as e:
-            print(f"Error playing received audio: {e}")
-
     def stop_audio(self):
         print("Stopping audio stream...")
         self.is_sending_audio = False
@@ -548,38 +525,21 @@ class ConferenceFrame(ttk.Frame):
     def stop_video(self):
         print("Stopping video stream...")
         self.is_sending_video = False
-        # 移除本地视频预览
-        if 'local' in self.video_frames:
-            self.video_frames['local'].destroy()  # 使用destroy而不是pack_forget
-            del self.video_frames['local']
-        # 重置视频面板
-        self.reset_video_panel()
+        self.video_manager.remove_video('local')
 
     def stop_screen_share(self):
         print("Stopping screen share...")
         self.is_sharing_screen = False
-        # 移除屏幕共享显示
-        if 'screen' in self.video_frames:
-            self.video_frames['screen'].destroy()  # 使用destroy而不是pack_forget
-            del self.video_frames['screen']
-        # 重置视频面板
-        self.reset_video_panel()
+        self.video_manager.stop_screen_share()
 
-    def reset_video_panel(self):
-        # 清理视频面板
-        for widget in self.video_panel.winfo_children():
-            widget.destroy()
-        # 可以添加默认的占位图或文字
-        default_label = ttk.Label(self.video_panel, text="等待视频连接...")
-        default_label.pack(expand=True)
-
+    # 队列处理
     async def process_video_queue(self):
         while True:
             try:
                 frame = await self.video_queue.get()
                 if frame is not None:
                     await self.client.send_video(frame)
-                await asyncio.sleep(0.033)  # 约30fps
+                await asyncio.sleep(self.frame_interval)
             except Exception as e:
                 print(f"Error processing video: {e}")
             finally:
@@ -591,7 +551,7 @@ class ConferenceFrame(ttk.Frame):
                 frame = await self.screen_queue.get()
                 if frame is not None:
                     await self.client.send_screen_share(frame)
-                await asyncio.sleep(0.05)  # 约20fps
+                await asyncio.sleep(self.frame_interval)
             except Exception as e:
                 print(f"Error processing screen share: {e}")
             finally:
@@ -608,6 +568,44 @@ class ConferenceFrame(ttk.Frame):
                 print(f"Error processing audio: {e}")
             finally:
                 self.audio_queue.task_done()
+
+    # 资源清理
+    def cleanup(self):
+        """清理所有资源"""
+        self.stop_video()
+        self.stop_screen_share()
+        self.stop_audio()
+        
+        # 清理所有视频帧
+        for participant_id in list(self.video_manager.video_frames.keys()):
+            self.video_manager.remove_video(participant_id)
+            
+        # 清空队列
+        while not self.video_queue.empty():
+            try:
+                self.video_queue.get_nowait()
+            except asyncio.QueueEmpty:
+                pass
+                
+        while not self.screen_queue.empty():
+            try:
+                self.screen_queue.get_nowait()
+            except asyncio.QueueEmpty:
+                pass
+
+    # 会议控制相关方法
+    def leave_conference_clicked(self):
+        self.master.loop.create_task(self.leave_conference())
+
+    async def leave_conference(self):
+        """离开会议并清理资源"""
+        # 执行清理
+        self.cleanup()
+        # 离开会议
+        await self.client.leave_conference()
+        # 切换回会议列表界面
+        self.master.switch_frame(ConferenceListFrame)
+
 if __name__ == "__main__":
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
