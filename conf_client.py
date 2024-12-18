@@ -1,126 +1,143 @@
-from util import *
-
+import asyncio
+from typing import Optional
+import socketio
+from protocol import Conference
 
 class ConferenceClient:
-    def __init__(self,):
-        # sync client
-        self.is_working = True
-        self.server_addr = None  # server addr
-        self.on_meeting = False  # status
-        self.conns = None  # you may need to maintain multiple conns for a single conference
-        self.support_data_types = []  # for some types of data
-        self.share_data = {}
+    def __init__(self, server_url):
+        self.sio = socketio.AsyncClient()
+        self.server_url = server_url
+        self.conference: Optional[Conference] = None
+        self.username = None
+        self._join_future = None 
+        
+        @self.sio.event
+        async def connect():
+            print("Connected to server")
+        
+        @self.sio.event
+        async def disconnect():
+            print("Disconnected from server")
+            self.conference = None
 
-        self.conference_info = None  # you may need to save and update some conference_info regularly
+        @self.sio.on('conference_created') 
+        async def on_conference_created(data):
+            print(f"Received conference_created event: {data}")
+            # 添加主动获取会议列表
+            await self.sio.emit('get_conferences')
 
-        self.recv_data = None  # you may need to save received streamd data from other clients in conference
+        @self.sio.on('conference_joined')
+        async def on_conference_joined(data):
+            print(f"Joined conference: {data}")
+            self.conference = Conference.from_dict(data)
+            if self._join_future and not self._join_future.done():
+                self._join_future.set_result(True)
 
-    def create_conference(self):
-        """
-        create a conference: send create-conference request to server and obtain necessary data to
-        """
-        pass
+        @self.sio.on('participant_joined')
+        async def on_participant_joined(data):
+            if self.conference and data['conference_id'] == self.conference.id:
+                self.conference.participants[data['client_id']] = data['client_name']
 
-    def join_conference(self, conference_id):
-        """
-        join a conference: send join-conference request with given conference_id, and obtain necessary data to
-        """
-        pass
+        @self.sio.on('participant_left')
+        async def on_participant_left(data):
+            if self.conference and data['conference_id'] == self.conference.id:
+                del self.conference.participants[data['client_id']]
 
-    def quit_conference(self):
-        """
-        quit your on-going conference
-        """
-        pass
+        # 用于在get_conferences调用中等待服务器返回的future
+        self._conference_list_future = None
 
-    def cancel_conference(self):
-        """
-        cancel your on-going conference (when you are the conference manager): ask server to close all clients
-        """
-        pass
+        @self.sio.on('conference_list')
+        async def on_conference_list(data):
+            print(f"Received conference list data: {data}")  # 添加调试日志
+            if self._conference_list_future and not self._conference_list_future.done():
+                try:
+                    self._conference_list_future.set_result(data)
+                except Exception as e:
+                    print(f"Error setting conference list result: {e}")
 
-    def keep_share(self, data_type, send_conn, capture_function, compress=None, fps_or_frequency=30):
-        '''
-        running task: keep sharing (capture and send) certain type of data from server or clients (P2P)
-        you can create different functions for sharing various kinds of data
-        '''
-        pass
+        @self.sio.on('conference_list_response')
+        async def on_conference_list_response(data):
+            print(f"Received conference list response: {data}")
+            if self._conference_list_future and not self._conference_list_future.done():
+                self._conference_list_future.set_result(data)
 
-    def share_switch(self, data_type):
-        '''
-        switch for sharing certain type of data (screen, camera, audio, etc.)
-        '''
-        pass
+    async def connect(self):
+        try:
+            print("Attempting to connect to server...")
+            await self.sio.connect(self.server_url)
+            print("Connected to server")
+        except Exception as e:
+            print(f"Error connecting to server: {e}")
 
-    def keep_recv(self, recv_conn, data_type, decompress=None):
-        '''
-        running task: keep receiving certain type of data (save or output)
-        you can create other functions for receiving various kinds of data
-        '''
+    async def disconnect(self):
+        await self.sio.disconnect()
 
-    def output_data(self):
-        '''
-        running task: output received stream data
-        '''
+    async def create_conference(self, conf_name, username):
+        await self.sio.emit('create_conference', {'name': conf_name, 'username': username})
 
-    def start_conference(self):
-        '''
-        init conns when create or join a conference with necessary conference_info
-        and
-        start necessary running task for conference
-        '''
+    async def join_conference(self, conf_id, username):
+        # 创建Future对象
+        loop = asyncio.get_running_loop()
+        self._join_future = loop.create_future()
 
-    def close_conference(self):
-        '''
-        close all conns to servers or other clients and cancel the running tasks
-        pay attention to the exception handling
-        '''
+        # 发送加入请求
+        await self.sio.emit('join_conference', {'conference_id': conf_id, 'username': username})
 
-    def start(self):
-        """
-        execute functions based on the command line input
-        """
-        while True:
-            if not self.on_meeting:
-                status = 'Free'
-            else:
-                status = f'OnMeeting-{self.conference_id}'
+        # 等待加入成功
+        try:
+            await asyncio.wait_for(self._join_future, timeout=5.0)
+        finally:
+            self._join_future = None
 
-            recognized = True
-            cmd_input = input(f'({status}) Please enter a operation (enter "?" to help): ').strip().lower()
-            fields = cmd_input.split(maxsplit=1)
-            if len(fields) == 1:
-                if cmd_input in ('?', '？'):
-                    print(HELP)
-                elif cmd_input == 'create':
-                    self.create_conference()
-                elif cmd_input == 'quit':
-                    self.quit_conference()
-                elif cmd_input == 'cancel':
-                    self.cancel_conference()
-                else:
-                    recognized = False
-            elif len(fields) == 2:
-                if fields[0] == 'join':
-                    input_conf_id = fields[1]
-                    if input_conf_id.isdigit():
-                        self.join_conference(input_conf_id)
-                    else:
-                        print('[Warn]: Input conference ID must be in digital form')
-                elif fields[0] == 'switch':
-                    data_type = fields[1]
-                    if data_type in self.share_data.keys():
-                        self.share_switch(data_type)
-                else:
-                    recognized = False
-            else:
-                recognized = False
+    async def leave_conference(self):
+        await self.sio.emit('leave_conference', {'conference_id': self.conference.id})
+        self.conference = None
 
-            if not recognized:
-                print(f'[Warn]: Unrecognized cmd_input {cmd_input}')
+    async def get_conferences(self):
+        if not self.sio.connected:
+            print("Not connected to server")
+            return []
 
+        loop = asyncio.get_running_loop()
+        self._conference_list_future = loop.create_future()
 
-if __name__ == '__main__':
-    client1 = ConferenceClient()
-    client1.start()
+        try:
+            print("Sending get_conferences request...")
+            await self.sio.emit('get_conferences')
+            print("Waiting for response...")
+            data = await asyncio.wait_for(self._conference_list_future, timeout=5)
+            print(f"Got conference list: {data}")
+            return [Conference.from_dict(conf_data) for conf_data in data['conferences']]
+        except asyncio.TimeoutError:
+            print("Timeout waiting for conference list")
+            return []
+        except Exception as e:
+            print(f"Error in get_conferences: {e}")
+            return []
+        finally:
+            self._conference_list_future = None
+            
+    async def send_message(self, message):
+       if self.conference:
+           await self.sio.emit('send_message', {'conference_id': self.conference.id, 'message': message})
 
+    async def send_audio(self, audio_data):
+        if self.conference:
+            await self.sio.emit('audio', {
+                'conference_id': self.conference.id,
+                'data': audio_data
+            })
+    
+    async def send_video(self, video_data):
+        if self.conference:
+            await self.sio.emit('video', {
+                'conference_id': self.conference.id,
+                'data': video_data
+            })
+    
+    async def send_screen_share(self, screen_data):
+        if self.conference:
+            await self.sio.emit('screen_share', {
+                'conference_id': self.conference.id,
+                'data': screen_data
+            })
