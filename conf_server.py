@@ -125,6 +125,15 @@ async def on_join_conference(sid, data):
         conf.participants[user_id] = username
         # 仍然使用sid加入房间，因为这是Socket.IO的要求
         await sio.enter_room(sid, conf_id)
+        video_sid = user_connections.get(user_id, {}).get('video')
+        if video_sid:
+            await video_sio.enter_room(video_sid, conf_id)
+            print(f"Video socket {video_sid} joined room {conf_id}")
+        # 屏幕共享socket加入房间    
+        screen_sid = user_connections.get(user_id, {}).get('screen')
+        if screen_sid:
+            await screen_sio.enter_room(screen_sid, conf_id)
+            print(f"Screen socket {screen_sid} joined room {conf_id}")
         await sio.emit('conference_joined', conf.to_dict(), room=sid)
         # 广播时使用user_id
         await sio.emit('participant_joined', {
@@ -149,6 +158,7 @@ async def on_leave_conference(sid, data):
         client_name = conf.participants[user_id]
         del conf.participants[user_id]
         await sio.leave_room(sid, conf_id)
+        
         # 广播时使用user_id
         await sio.emit('participant_left', {
             'conference_id': conf_id,

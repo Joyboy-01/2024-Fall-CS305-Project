@@ -371,8 +371,8 @@ class ConferenceFrame(ttk.Frame):
     def setup_event_handlers(self):
         """设置事件处理"""
         self.client.sio.on('audio', self.on_audio_received)
-        self.client.sio.on('video', self.on_video_received)
-        self.client.sio.on('screen_share', self.on_screen_share_received)
+        self.client.video_sio.on('video', self.on_video_received)
+        self.client.screen_sio.on('screen_share', self.on_screen_share_received)
         self.client.sio.on('participant_joined', self.on_participant_joined)
         self.client.sio.on('participant_left', self.on_participant_left)
         self.client.sio.on('message_received', self.on_message_received)

@@ -88,6 +88,41 @@ class ConferenceClient:
             if self._conference_list_future and not self._conference_list_future.done():
                 self._conference_list_future.set_result(data)
 
+        @self.video_sio.event
+        async def connect():
+            print("Connected to video channel")
+            await self.video_sio.emit('register_connection', {'user_id': self.user_id})
+            
+        @self.video_sio.event
+        async def disconnect():
+            print("Disconnected from video channel")
+    
+        @self.video_sio.on('video')
+        async def on_video(data):
+            if hasattr(self, 'master') and hasattr(self.master, 'on_video_received'):
+                await self.master.on_video_received(data)
+    
+        # 屏幕共享通道事件处理器
+        @self.screen_sio.event
+        async def connect():
+            print("Connected to screen channel")
+            await self.screen_sio.emit('register_connection', {'user_id': self.user_id})
+            
+        @self.screen_sio.event
+        async def disconnect():
+            print("Disconnected from screen channel")
+    
+        @self.screen_sio.on('screen_share')
+        async def on_screen_share(data):
+            if hasattr(self, 'master') and hasattr(self.master, 'on_screen_share_received'):
+                await self.master.on_screen_share_received(data)
+    
+        # 音频事件处理器 (在主通道上)
+        @self.sio.on('audio')
+        async def on_audio(data):
+            if hasattr(self, 'master') and hasattr(self.master, 'on_audio_received'):
+                await self.master.on_audio_received(data)
+                
     async def connect(self):
         """连接到所有通道"""
         try:
