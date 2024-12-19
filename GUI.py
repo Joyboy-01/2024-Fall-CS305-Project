@@ -385,8 +385,17 @@ class ConferenceFrame(ttk.Frame):
 
     async def on_audio_received(self, data):
         """处理接收到的音频"""
+        """处理接收到的音频"""
         try:
-            if 'data' in data and 'sender_id' in data:
+            if 'data' in data and 'user_id' in data:
+                user_id = data['user_id']
+                print(f"Received screen share from user {user_id}")
+                
+                # 使用user_id进行比较
+                if user_id == self.client.user_id:
+                    print("Skipping own audio")
+                    return
+        
                 streamout.write(data['data'])
         except Exception as e:
             print(f"Error playing received audio: {e}")
@@ -394,40 +403,38 @@ class ConferenceFrame(ttk.Frame):
     async def on_video_received(self, data):
         """处理接收到的视频"""
         try:
-            if 'data' in data and 'sender_id' in data:
-                sender_id = data['sender_id']
-                print(f"Received video from {sender_id}")
-                
-                # 使用视频通道的 socket ID 进行比较
-                if sender_id == self.client.sio.sid or sender_id==self.client.video_sio.sid or sender_id==self.client.screen_sio.sid:
+            if 'data' in data and 'user_id' in data:
+                user_id = data['user_id']
+                print(f"Received video from user {user_id}")
+
+                # 使用user_id进行比较而不是socket ID
+                if user_id == self.client.user_id:
                     print("Skipping own video")
                     return
-                    
+
                 frame = decompress_image(data['data'])
-                # 更新视频显示
-                self.video_manager.update_video(sender_id, frame)
+                self.video_manager.update_video(user_id, frame)
         except Exception as e:
-            print(f"Error displaying received video: {e}")
+            print(f"Error displaying video: {e}")
 
     async def on_screen_share_received(self, data):
         """处理接收到的屏幕共享"""
         try:
-            if 'data' in data and 'sender_id' in data:
-                sender_id = data['sender_id']
-                print(f"Received screen share from {sender_id}")
-                # 不处理自己发送的屏幕共享
-                if sender_id == self.client.sio.sid or sender_id==self.client.video_sio.sid or sender_id==self.client.screen_sio.sid:
-                    print("Skipping own video")
+            if 'data' in data and 'user_id' in data:
+                user_id = data['user_id']
+                print(f"Received screen share from user {user_id}")
+                
+                # 使用user_id进行比较
+                if user_id == self.client.user_id:
+                    print("Skipping own screen share")
                     return
-
+    
                 screen = decompress_image(data['data'])
-                # 启动屏幕共享显示
                 if not self.video_manager.is_screen_sharing:
-                    self.video_manager.start_screen_share(sender_id)
-                # 更新屏幕共享内容
+                    self.video_manager.start_screen_share(user_id)
                 self.video_manager.update_screen_share(screen)
         except Exception as e:
-            print(f"Error displaying received screen share: {e}")
+            print(f"Error displaying screen share: {e}")
 
     def on_participant_joined(self, data):
         """处理参与者加入事件"""
