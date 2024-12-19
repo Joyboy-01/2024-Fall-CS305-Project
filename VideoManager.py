@@ -343,3 +343,29 @@ class VideoGridManager:
             target_height = int(target_width / aspect_ratio)
         
         return image.resize((target_width, target_height), Image.Resampling.LANCZOS)
+    
+    def remove_video(self, participant_id):
+        """移除视频框"""
+        if participant_id in self.video_frames:
+            try:
+                # 清除图像
+                label = self.video_frames[participant_id]['label']
+                label.configure(image='')
+                label.image = None
+    
+                # 显示黑色背景
+                black_img = Image.new('RGB', (self.default_video_width, self.default_video_height), color='black')
+                photo = ImageTk.PhotoImage(black_img)
+                label.configure(image=photo)
+                label.image = photo
+    
+                # 销毁框架
+                self.video_frames[participant_id]['frame'].destroy()
+                del self.video_frames[participant_id]
+    
+                # 更新布局
+                self.container.update_idletasks()
+                self.update_layout()
+                print(f"Successfully removed video for participant {participant_id}")
+            except Exception as e:
+                print(f"移除视频时出错: {e}")

@@ -376,6 +376,8 @@ class ConferenceFrame(ttk.Frame):
         self.client.sio.on('participant_joined', self.on_participant_joined)
         self.client.sio.on('participant_left', self.on_participant_left)
         self.client.sio.on('message_received', self.on_message_received)
+        self.client.video_sio.on('video_stopped', self.on_video_stopped)
+        self.client.screen_sio.on('screen_share_stopped', self.on_screen_share_stopped)
 
     def start_processing_tasks(self):
         """启动异步处理任务"""
@@ -384,7 +386,6 @@ class ConferenceFrame(ttk.Frame):
         self.master.loop.create_task(self.process_audio_queue())
 
     async def on_audio_received(self, data):
-        """处理接收到的音频"""
         """处理接收到的音频"""
         try:
             if 'data' in data and 'user_id' in data:
@@ -556,7 +557,7 @@ class ConferenceFrame(ttk.Frame):
             else:
                 # 停止屏幕共享
                 self.is_sharing_screen = False
-                success = self.video_manager.stop_screen_share('local')
+                success = self.stop_screen_share()
                 return success
     
         except Exception as e:
@@ -642,6 +643,9 @@ class ConferenceFrame(ttk.Frame):
         self.is_sending_video = False
 
         try:
+            # 通知其他用户
+            self.master.loop.create_task(self.client.notify_video_stopped())
+
             # 确保视频被正确停止并清理
             if hasattr(self, 'video_manager'):
                 # 停止本地视频显示
@@ -662,16 +666,19 @@ class ConferenceFrame(ttk.Frame):
         """停止屏幕共享"""
         print("正在停止屏幕共享...")
         self.is_sharing_screen = False
-        
+
         try:
+            # 通知其他用户
+            self.master.loop.create_task(self.client.notify_screen_share_stopped())
+
             # 确保屏幕共享被正确停止并清理
             if hasattr(self, 'video_manager'):
                 # 停止屏幕共享并更新UI
-                self.video_manager.stop_screen_share('local')
-                
+                success = self.video_manager.stop_screen_share('local')
+
                 # 强制更新界面
                 self.video_manager.container.update_idletasks()
-            
+
             # 清空屏幕共享队列
             while not self.screen_queue.empty():
                 try:
@@ -679,9 +686,34 @@ class ConferenceFrame(ttk.Frame):
                     self.screen_queue.task_done()
                 except asyncio.QueueEmpty:
                     break
+
+            return success
         except Exception as e:
             print(f"停止屏幕共享时出错: {e}")
 
+    async def on_video_stopped(self, data):
+        """处理其他用户停止视频的事件"""
+        try:
+            if data['conference_id'] == self.conference.id:
+                user_id = data['user_id']
+                if user_id != self.client.user_id:  # 不处理自己的停止事件
+                    print(f"User {user_id} stopped video")
+                    self.video_manager.set_video_active(user_id, False)
+                    self.video_manager.remove_video(user_id)
+        except Exception as e:
+            print(f"处理视频停止事件时出错: {e}")
+
+    async def on_screen_share_stopped(self, data):
+        """处理其他用户停止屏幕共享的事件"""
+        try:
+            if data['conference_id'] == self.conference.id:
+                user_id = data['user_id']
+                if user_id != self.client.user_id:  # 不处理自己的停止事件
+                    print(f"User {user_id} stopped screen sharing")
+                    if self.video_manager.screen_sharer_id == user_id:
+                        self.video_manager.stop_screen_share(user_id)
+        except Exception as e:
+            print(f"处理屏幕共享停止事件时出错: {e}")
     # Queue Processing
     async def process_video_queue(self):
         """处理视频队列"""

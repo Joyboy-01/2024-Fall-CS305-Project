@@ -283,5 +283,39 @@ async def handle_audio(sid, data):
     except Exception as e:
         print(f"Error broadcasting audio: {e}")
 
+# 添加视频关闭事件处理
+@video_sio.on('video_stopped')
+async def handle_video_stopped(sid, data):
+    try:
+        user_id = data.get('user_id')
+        conf_id = data['conference_id']
+        if not user_id or conf_id not in conferences:
+            return
+            
+        print(f"Broadcasting video stop from user {user_id}")
+        await video_sio.emit('video_stopped', {
+            'conference_id': conf_id,
+            'user_id': user_id
+        }, room=conf_id, skip_sid=sid)
+    except Exception as e:
+        print(f"Error broadcasting video stop: {e}")
+
+# 添加屏幕共享关闭事件处理
+@screen_sio.on('screen_share_stopped')
+async def handle_screen_share_stopped(sid, data):
+    try:
+        user_id = data.get('user_id')
+        conf_id = data['conference_id']
+        if not user_id or conf_id not in conferences:
+            return
+            
+        print(f"Broadcasting screen share stop from user {user_id}")
+        await screen_sio.emit('screen_share_stopped', {
+            'conference_id': conf_id,
+            'user_id': user_id
+        }, room=conf_id, skip_sid=sid)
+    except Exception as e:
+        print(f"Error broadcasting screen share stop: {e}")
+        
 if __name__ == '__main__':
     web.run_app(app, host='127.0.0.1', port=8888)
