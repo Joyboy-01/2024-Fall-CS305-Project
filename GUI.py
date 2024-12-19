@@ -616,8 +616,10 @@ class ConferenceFrame(ttk.Frame):
 
         # 确保视频被正确停止并清理
         if hasattr(self, 'video_manager'):
+            self.video_manager.remove_video('local')
+            # 然后设置视频状态为非活跃
             self.video_manager.set_video_active('local', False)
-        
+    
         # 清空视频队列
         while not self.video_queue.empty():
             try:
@@ -630,7 +632,21 @@ class ConferenceFrame(ttk.Frame):
         """停止屏幕共享"""
         print("Stopping screen share...")
         self.is_sharing_screen = False
-        self.video_manager.stop_screen_share('local')
+        
+        # 确保屏幕共享被正确停止并清理
+        if hasattr(self, 'video_manager'):
+            # 停止屏幕共享并更新UI
+            self.video_manager.stop_screen_share('local')
+            # 确保更新界面
+            self.video_manager.container.update_idletasks()
+        
+        # 清空屏幕共享队列
+        while not self.screen_queue.empty():
+            try:
+                self.screen_queue.get_nowait()
+                self.screen_queue.task_done()
+            except asyncio.QueueEmpty:
+                break
 
     # Queue Processing
     async def process_video_queue(self):
