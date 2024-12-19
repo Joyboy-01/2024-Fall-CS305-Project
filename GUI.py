@@ -440,16 +440,16 @@ class ConferenceFrame(ttk.Frame):
         """处理参与者加入事件"""
         if data['conference_id'] == self.conference.id:
             print(f"New participant joined: {data['client_name']}")
-            self.conference.participants[data['client_id']] = data['client_name']
+            self.conference.participants[data['user_id']] = data['client_name']
             self.update_participant_list()
 
     def on_participant_left(self, data):
         """处理参与者离开事件"""
         if data['conference_id'] == self.conference.id:
             print(f"Participant left: {data['client_name']}")
-            if data['client_id'] in self.conference.participants:
-                del self.conference.participants[data['client_id']]
-            self.video_manager.remove_video(data['client_id'])
+            if data['user_id'] in self.conference.participants:
+                del self.conference.participants[data['user_id']]
+            self.video_manager.remove_video(data['user_id'])
             self.update_participant_list()
 
     def close_conference_clicked(self):
@@ -533,23 +533,34 @@ class ConferenceFrame(ttk.Frame):
         """处理屏幕共享开关"""
         try:
             if should_enable:
-                # 检查是否有人在共享屏幕
-                for participant in self.conference.participants.values():
-                    if isinstance(participant, dict) and participant.get('is_sharing_screen'):
-                        print("Another user is already sharing their screen")
-                        return False
-
-                self.master.loop.create_task(self.start_screen_share())
-                self.is_sharing_screen = True
+                # 检查当前的屏幕共享状态
+                if self.video_manager.is_screen_sharing:
+                    print("Screen is already being shared")
+                    return False
+    
+                # 检查是否有其他人在共享屏幕
+                for participant_id, participant in self.conference.participants.items():
+                    if participant_id != self.client.user_id:  # 不检查自己
+                        if isinstance(participant, dict) and participant.get('is_sharing_screen'):
+                            print("Another user is already sharing their screen")
+                            return False
+    
+                # 启动屏幕共享
                 success = self.video_manager.start_screen_share('local')
+                if success:
+                    self.is_sharing_screen = True
+                    self.master.loop.create_task(self.start_screen_share())
                 return success
             else:
-                self.stop_screen_share()
+                # 停止屏幕共享
                 self.is_sharing_screen = False
                 success = self.video_manager.stop_screen_share('local')
                 return success
+    
         except Exception as e:
             print(f"Error toggling screen share: {e}")
+            # 发生错误时确保状态被重置
+            self.is_sharing_screen = False
             return False
     
     async def start_audio(self):

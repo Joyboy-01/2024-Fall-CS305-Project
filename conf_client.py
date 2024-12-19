@@ -67,12 +67,16 @@ class ConferenceClient:
         async def on_participant_joined(data):
             if self.conference and data['conference_id'] == self.conference.id:
                 self.conference.participants[data['user_id']] = data['client_name']
+                if hasattr(self, 'master') and hasattr(self.master, 'update_participant_list'):
+                    self.master.update_participant_list()
 
         @self.sio.on('participant_left')
         async def on_participant_left(data):
             if self.conference and data['conference_id'] == self.conference.id:
                 if data['user_id'] in self.conference.participants:
                     del self.conference.participants[data['user_id']]
+                if hasattr(self, 'master') and hasattr(self.master, 'update_participant_list'):
+                    self.master.update_participant_list()
 
         @self.sio.on('conference_list')
         async def on_conference_list(data):
@@ -180,7 +184,7 @@ class ConferenceClient:
             await self.video_sio.emit('video', {
                 'conference_id': self.conference.id,
                 'data': video_data['data'] if isinstance(video_data, dict) else video_data,
-                'user_id': self.user_id
+                'user_id': self.user_id  # 确保使用user_id而不是socket id
             })
 
     async def send_screen_share(self, screen_data):
@@ -189,7 +193,7 @@ class ConferenceClient:
             await self.screen_sio.emit('screen_share', {
                 'conference_id': self.conference.id,
                 'data': screen_data['data'] if isinstance(screen_data, dict) else screen_data,
-                'user_id': self.user_id
+                'user_id': self.user_id  # 确保使用user_id而不是socket id
             })
 
     async def send_audio(self, audio_data):

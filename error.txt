@@ -1,4 +1,18 @@
 现在有以下几个问题：
-1.sio的号码一定要对上，在接受视频，关闭视频等，只有自己能关闭，别人不能关闭这要求sio的号码一定要对的上
-4.在创建会议的时候直接进入，不然会又bug:房间没人依旧存在
-5解决卡顿问题
+
+关闭按钮
+
+正在停止屏幕共享...
+Stopping screen share for local
+Screen share stopped successfully
+Stopping screen share for local
+Cannot stop screen share: wrong sharer
+连续四个
+
+
+
+创建之后立即进入会议
+创造者没有关闭会议按钮
+
+
+收不到广播

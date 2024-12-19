@@ -121,9 +121,12 @@ async def on_join_conference(sid, data):
     conf = conferences.get(conf_id)
 
     if conf and len(conf.participants) < conf.max_participants:
+        # 使用user_id而不是sid
         conf.participants[user_id] = username
+        # 仍然使用sid加入房间，因为这是Socket.IO的要求
         await sio.enter_room(sid, conf_id)
         await sio.emit('conference_joined', conf.to_dict(), room=sid)
+        # 广播时使用user_id
         await sio.emit('participant_joined', {
             'conference_id': conf_id,
             'user_id': user_id,
@@ -146,6 +149,7 @@ async def on_leave_conference(sid, data):
         client_name = conf.participants[user_id]
         del conf.participants[user_id]
         await sio.leave_room(sid, conf_id)
+        # 广播时使用user_id
         await sio.emit('participant_left', {
             'conference_id': conf_id,
             'user_id': user_id,
@@ -157,6 +161,7 @@ async def on_leave_conference(sid, data):
             if conf_id in conferences:
                 del conferences[conf_id]
             await sio.emit('conference_closed', {'conference_id': conf_id})
+
 
 @sio.on('close_conference')
 async def on_close_conference(sid, data):
@@ -210,35 +215,49 @@ async def on_send_message(sid, data):
         }, room=conf_id)
 
 # 媒体流处理
+# 修改视频处理部分
 @video_sio.on('video')
 async def handle_video(sid, data):
     try:
+        user_id = data.get('user_id')
         conf_id = data['conference_id']
-        user_id = data['user_id']
-        if conf_id in conferences and user_id:
+        if not user_id or conf_id not in conferences:
+            print("No user_id or conf_id provided in send_message")
+            return
+            
+        # 获取用户的video socket id
+        video_sid = user_connections.get(user_id, {}).get('video')
+        if video_sid:
             print(f"Broadcasting video from user {user_id}")
             await video_sio.emit('video', {
                 'conference_id': conf_id,
                 'data': data['data'],
                 'user_id': user_id
-            }, room=conf_id, skip_sid=sid)
+            }, room=conf_id, skip_sid=video_sid)
     except Exception as e:
         print(f"Error broadcasting video: {e}")
 
+# 修改屏幕共享处理部分
 @screen_sio.on('screen_share')
 async def handle_screen_share(sid, data):
     try:
+        user_id = data.get('user_id')
         conf_id = data['conference_id']
-        user_id = data['user_id']
-        if conf_id in conferences and user_id:
+        if not user_id or conf_id not in conferences:
+            return
+            
+        # 获取用户的screen socket id
+        screen_sid = user_connections.get(user_id, {}).get('screen')
+        if screen_sid:
             print(f"Broadcasting screen share from user {user_id}")
             await screen_sio.emit('screen_share', {
                 'conference_id': conf_id,
                 'data': data['data'],
                 'user_id': user_id
-            }, room=conf_id, skip_sid=sid)
+            }, room=conf_id, skip_sid=screen_sid)
     except Exception as e:
         print(f"Error broadcasting screen share: {e}")
+
 
 @sio.on('audio')
 async def handle_audio(sid, data):
