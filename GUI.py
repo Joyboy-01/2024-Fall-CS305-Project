@@ -7,7 +7,7 @@ from util import *
 from conf_client import ConferenceClient
 from VideoManager import VideoGridManager
 from Controlbar import ControlBar
-from time import time
+import time
 class LoginFrame(ttk.Frame):
     pass
 
@@ -256,7 +256,8 @@ class ConferenceFrame(ttk.Frame):
         self.is_sending_audio = False
         self.is_sending_video = False
         self.is_sharing_screen = False
-        self.frame_interval = 1/30  # 30 FPS
+        self.frame_interval = 1/20  # 30 FPS
+        self.video_quality = 60
         self.is_creator = self.conference.creator_id == self.client.sio.sid
         print(f"Creator check: conference creator_id={self.conference.creator_id}, client sid={self.client.sio.sid}")  # 添加调试信息
 
@@ -270,7 +271,7 @@ class ConferenceFrame(ttk.Frame):
         # 设置事件处理和创建布局
         self.setup_event_handlers()
         self.create_layout()
-
+        self.update_participant_list()
         # 启动处理任务
         self.start_processing_tasks()
         
@@ -356,6 +357,10 @@ class ConferenceFrame(ttk.Frame):
 
         control_button_frame = ttk.Frame(parent)
         control_button_frame.grid(row=2, column=0, sticky="ew", padx=5, pady=5)
+
+        control_button_frame.grid_columnconfigure(0, weight=1)
+        control_button_frame.grid_columnconfigure(1, weight=1)
+    
         # 离开会议按钮 - 使用grid而不是pack
         leave_button = ttk.Button(parent, text="离开会议", command=self.leave_conference_clicked)
         leave_button.grid(row=2, column=0, sticky="ew", padx=5, pady=5)
@@ -363,10 +368,6 @@ class ConferenceFrame(ttk.Frame):
             close_button = ttk.Button(control_button_frame, text="关闭会议", 
                                     command=self.close_conference_clicked)
             close_button.grid(row=0, column=1, sticky="ew", padx=5)
-            
-        control_button_frame.grid_columnconfigure(0, weight=1)
-        if self.is_creator:
-            control_button_frame.grid_columnconfigure(1, weight=1)
     def setup_event_handlers(self):
         """设置事件处理"""
         self.client.sio.on('audio', self.on_audio_received)
@@ -382,11 +383,10 @@ class ConferenceFrame(ttk.Frame):
         self.master.loop.create_task(self.process_screen_queue())
         self.master.loop.create_task(self.process_audio_queue())
 
-    # Event Handlers
     async def on_audio_received(self, data):
         """处理接收到的音频"""
         try:
-            if 'data' in data:
+            if 'data' in data and 'sender_id' in data:
                 streamout.write(data['data'])
         except Exception as e:
             print(f"Error playing received audio: {e}")
@@ -394,19 +394,29 @@ class ConferenceFrame(ttk.Frame):
     async def on_video_received(self, data):
         """处理接收到的视频"""
         try:
-            if 'data' in data and 'participant_id' in data:
+            if 'data' in data and 'sender_id' in data:
+                sender_id = data['sender_id']
+                print(f"Received video from {sender_id}")
+                # 不处理自己发送的视频
+                if sender_id == self.client.sio.sid:
+                    return
+
                 frame = decompress_image(data['data'])
-                participant_id = data['participant_id']
-                # 只有当视频来自其他参与者时才显示
-                if participant_id != 'local':
-                    self.video_manager.update_video(participant_id, frame)
+                # 更新视频显示
+                self.video_manager.update_video(sender_id, frame)
         except Exception as e:
             print(f"Error displaying received video: {e}")
 
     async def on_screen_share_received(self, data):
         """处理接收到的屏幕共享"""
         try:
-            if 'data' in data:
+            if 'data' in data and 'sender_id' in data:
+                sender_id = data['sender_id']
+                print(f"Received screen share from {sender_id}")
+                # 不处理自己发送的屏幕共享
+                if sender_id == self.client.sio.sid:
+                    return
+
                 screen = decompress_image(data['data'])
                 self.video_manager.update_screen_share(screen)
         except Exception as e:
@@ -450,8 +460,9 @@ class ConferenceFrame(ttk.Frame):
     def update_participant_list(self):
         """更新参与者列表"""
         self.participant_list.delete(0, tk.END)
-        for participant_id, name in self.conference.participants.items():
-            self.participant_list.insert(tk.END, name)
+        for participant_id, name in sorted(self.conference.participants.items()):
+            display_name = f"{name} (你)" if participant_id == self.client.sio.sid else name
+            self.participant_list.insert(tk.END, display_name)
 
     def insert_message(self, message):
         """插入新消息到聊天区域"""
@@ -541,27 +552,33 @@ class ConferenceFrame(ttk.Frame):
                 pass
             except Exception as e:
                 print(f"Error in audio streaming: {e}")
-                self.is_sending_audio = False
+                self.is_sending_audio = False   
 
     async def start_video(self):
-        """开始视频流"""
+        """优化后的视频流"""
         print("Starting video stream...")
         self.is_sending_video = True
+        last_frame_time = 0
+        
         while self.is_sending_video:
             try:
+                current_time = time.time()
+                if current_time - last_frame_time < self.frame_interval:
+                    await asyncio.sleep(0.001)
+                    continue
+                    
                 frame = capture_camera()
                 if frame and not self.video_queue.full():
-                    compressed_frame = compress_image(frame)
-                    # 添加participant_id
+                    # 压缩质量降低以减少数据量
+                    compressed_frame = compress_image(frame, quality=self.video_quality)
                     await self.video_queue.put({
                         'data': compressed_frame,
-                        'participant_id': 'local'
+                        'participant_id': self.client.sio.sid
                     })
-                    # 只在本地更新一次预览
                     self.video_manager.update_video('local', frame)
-                await asyncio.sleep(self.frame_interval)
-            except asyncio.QueueFull:
-                pass
+                    last_frame_time = current_time
+                    
+                await asyncio.sleep(0.001)
             except Exception as e:
                 print(f"Error in video streaming: {e}")
 
@@ -569,20 +586,23 @@ class ConferenceFrame(ttk.Frame):
         """开始屏幕共享"""
         print("Starting screen share...")
         self.is_sharing_screen = True
-        self.video_manager.start_screen_share('local')
         while self.is_sharing_screen:
             try:
                 screen = capture_screen()
                 if screen and not self.screen_queue.full():
-                    compressed_screen = compress_image(screen)
-                    await self.screen_queue.put(compressed_screen)
+                    compressed_screen = compress_image(screen, quality=70)  # 降低一点质量以减少数据量
+                    screen_data = {
+                        'data': compressed_screen,
+                        'participant_id': self.client.sio.sid
+                    }
+                    await self.screen_queue.put(screen_data)
                     # 更新本地预览
                     self.video_manager.update_screen_share(screen)
                 await asyncio.sleep(self.frame_interval)
-            except asyncio.QueueFull:
-                pass
             except Exception as e:
                 print(f"Error in screen sharing: {e}")
+                break
+
 
     def stop_audio(self):
         """停止音频流"""
@@ -593,7 +613,18 @@ class ConferenceFrame(ttk.Frame):
         """停止视频流"""
         print("Stopping video stream...")
         self.is_sending_video = False
-        self.video_manager.set_video_active('local', False)
+
+        # 确保视频被正确停止并清理
+        if hasattr(self, 'video_manager'):
+            self.video_manager.set_video_active('local', False)
+        
+        # 清空视频队列
+        while not self.video_queue.empty():
+            try:
+                self.video_queue.get_nowait()
+                self.video_queue.task_done()
+            except asyncio.QueueEmpty:
+                break
 
     def stop_screen_share(self):
         """停止屏幕共享"""
@@ -619,9 +650,10 @@ class ConferenceFrame(ttk.Frame):
         """处理屏幕共享队列"""
         while True:
             try:
-                frame = await self.screen_queue.get()
-                if frame is not None:
-                    await self.client.send_screen_share(frame)
+                screen_data = await self.screen_queue.get()
+                if screen_data is not None:
+                    print(f"Sending screen share, queue size: {self.screen_queue.qsize()}")
+                    await self.client.send_screen_share(screen_data)
                 await asyncio.sleep(0.05)
             except Exception as e:
                 print(f"Error processing screen share: {e}")

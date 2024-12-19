@@ -111,27 +111,32 @@ class VideoGridManager:
     
     def update_screen_share(self, image):
         """更新屏幕共享图像"""
-        if not self.is_screen_sharing or not self.screen_share_frame:
+        if not self.is_screen_sharing:
+            self.start_screen_share('remote')  # 确保屏幕共享视图已经启动
+
+        if not self.screen_share_frame:
             return
+        try:
+            container_width = self.container.winfo_width() or 800
+            container_height = self.container.winfo_height() or 600
             
-        container_width = self.container.winfo_width() or 800
-        container_height = self.container.winfo_height() or 600
-        
-        # 保持宽高比
-        w, h = image.size
-        aspect_ratio = w / h
-        
-        if container_width / container_height > aspect_ratio:
-            new_height = container_height
-            new_width = int(container_height * aspect_ratio)
-        else:
-            new_width = container_width
-            new_height = int(container_width / aspect_ratio)
+            # 保持宽高比
+            w, h = image.size
+            aspect_ratio = w / h
             
-        resized_image = image.resize((new_width, new_height), Image.Resampling.LANCZOS)
-        photo = ImageTk.PhotoImage(resized_image)
-        self.screen_share_label.configure(image=photo)
-        self.screen_share_label.image = photo
+            if container_width / container_height > aspect_ratio:
+                new_height = container_height
+                new_width = int(container_height * aspect_ratio)
+            else:
+                new_width = container_width
+                new_height = int(container_width / aspect_ratio)
+                
+            resized_image = image.resize((new_width, new_height), Image.Resampling.LANCZOS)
+            photo = ImageTk.PhotoImage(resized_image)
+            self.screen_share_label.configure(image=photo)
+            self.screen_share_label.image = photo
+        except Exception as e:
+            print(f"Error updating screen share: {e}")
     
     def update_layout(self):
         """更新整体布局"""

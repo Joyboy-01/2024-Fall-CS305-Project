@@ -138,24 +138,35 @@ class ConferenceClient:
         if self.conference:
             await self.sio.emit('audio', {
                 'conference_id': self.conference.id,
-                'data': audio_data
+                'data': audio_data,
+                'sender_id': self.sio.sid
             })
-    
-    # 在 conf_client.py 中
+        
     async def send_video(self, video_data):
         if self.conference:
             await self.video_sio.emit('video', {
                 'conference_id': self.conference.id,
-                'data': video_data['data'],
-                'participant_id': 'local'  # 添加发送者标识
+                'data': video_data['data'],  # video_data已经是字典格式
+                'sender_id': self.sio.sid
             })
-    
+        
     async def send_screen_share(self, screen_data):
         if self.conference:
-            await self.screen_sio.emit('screen_share', {
-                'conference_id': self.conference.id,
-                'data': screen_data
-            })
+            # screen_data 应该和 video_data 保持一致的格式
+            if isinstance(screen_data, dict):
+                await self.screen_sio.emit('screen_share', {
+                    'conference_id': self.conference.id,
+                    'data': screen_data['data'],
+                    'sender_id': self.sio.sid
+                })
+            else:
+                # 为了向后兼容，如果收到的是原始数据，自动转换为字典格式
+                await self.screen_sio.emit('screen_share', {
+                    'conference_id': self.conference.id,
+                    'data': screen_data,
+                    'sender_id': self.sio.sid
+                })
+
     async def close_conference(self):
         """关闭会议（仅创建者可用）"""
         if self.conference:
