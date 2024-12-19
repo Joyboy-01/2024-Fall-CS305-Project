@@ -6,6 +6,10 @@ from protocol import Conference
 class ConferenceClient:
     def __init__(self, server_url):
         self.sio = socketio.AsyncClient()
+        # 视频通道
+        self.video_sio = socketio.AsyncClient()
+        # 屏幕共享通道
+        self.screen_sio = socketio.AsyncClient()
         self.server_url = server_url
         self.conference: Optional[Conference] = None
         self.username = None
@@ -63,9 +67,12 @@ class ConferenceClient:
 
     async def connect(self):
         try:
-            print("Attempting to connect to server...")
-            await self.sio.connect(self.server_url)
-            print("Connected to server")
+            # 连接主通道
+            await self.sio.connect(f"{self.server_url}")
+            # 连接视频通道
+            await self.video_sio.connect(f"{self.server_url}/video")
+            # 连接屏幕共享通道
+            await self.screen_sio.connect(f"{self.server_url}/screen")
         except Exception as e:
             print(f"Error connecting to server: {e}")
 
@@ -130,14 +137,14 @@ class ConferenceClient:
     
     async def send_video(self, video_data):
         if self.conference:
-            await self.sio.emit('video', {
+            await self.video_sio.emit('video', {
                 'conference_id': self.conference.id,
                 'data': video_data
             })
     
     async def send_screen_share(self, screen_data):
         if self.conference:
-            await self.sio.emit('screen_share', {
+            await self.screen_sio.emit('screen_share', {
                 'conference_id': self.conference.id,
                 'data': screen_data
             })

@@ -620,4 +620,3 @@ if __name__ == "__main__":
             task.cancel()
         loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
         loop.close()
-

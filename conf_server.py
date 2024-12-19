@@ -1,4 +1,3 @@
-# conf_server.py
 from typing import Dict
 import uuid
 import socketio
@@ -153,30 +152,9 @@ async def handle_video(sid, data):
 
 @sio.on('screen_share')
 async def handle_screen_share(sid, data):
-    """处理屏幕共享数据"""
-    try:
-        conf_id = data['conference_id']
-        if conf_id in conferences:
-            # 添加发送者信息
-            data['sender_id'] = sid
-            # 广播给同一会议的其他参与者
-            await sio.emit('screen_share', data, room=conf_id, skip_sid=sid)
-    except Exception as e:
-        print(f"Error handling screen share: {e}")
-
-# 在 ConferenceFrame 中修改屏幕共享接收处理
-def on_screen_share_received(self, data):
-    try:
-        if 'data' in data and data.get('sender_id') != self.client.sio.sid:
-            screen = decompress_image(data['data'])
-            current_time = time.time()
-            last_time = self.last_frame_time.get('screen', 0)
-            if current_time - last_time >= self.frame_interval:
-                self.video_manager.start_screen_share()  # 确保开启屏幕共享模式
-                self.video_manager.update_screen_share(screen)
-                self.last_frame_time['screen'] = current_time
-    except Exception as e:
-        print(f"Error displaying received screen share: {e}")
-               
+    conf_id = data['conference_id']
+    if conf_id in conferences:
+        await sio.emit('screen_share', data, room=conf_id, skip_sid=sid)
+        
 if __name__ == '__main__':
     web.run_app(app, host='127.0.0.1', port=8888)
