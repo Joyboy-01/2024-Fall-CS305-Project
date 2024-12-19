@@ -168,7 +168,23 @@ class ConferenceListFrame(ttk.Frame):
 
     async def _create_conference(self, conf_name):
         await self.client.create_conference(conf_name, self.client.username)
-        await self.refresh_conferences_async()
+        await asyncio.sleep(0.1)
+        conferences = await self.client.get_conferences()
+        
+        # 找到刚刚创建的会议
+        created_conference = next(
+            (conf for conf in conferences if conf.name == conf_name), 
+            None
+        )
+        
+        if created_conference:
+            # 立即加入会议
+            await self.client.join_conference(created_conference.id, self.client.username)
+            # 切换到会议界面
+            self.master.switch_frame(ConferenceFrame)
+        else:
+            print("Error: Could not find newly created conference")
+        # await self.refresh_conferences_async()
 
     def join_conference(self, event):
         self.master.loop.create_task(self._join_selected_conference())
@@ -258,9 +274,8 @@ class ConferenceFrame(ttk.Frame):
         self.is_sharing_screen = False
         self.frame_interval = 1/20  # 30 FPS
         self.video_quality = 60
-        self.is_creator = self.conference.creator_id == self.client.sio.sid
-        print(f"Creator check: conference creator_id={self.conference.creator_id}, client sid={self.client.sio.sid}")  # 添加调试信息
-
+        self.is_creator = self.conference.creator_id == self.client.user_id  # 使用 user_id 而不是 sio.sid
+        print(f"Creator check: conference creator_id={self.conference.creator_id}, client user_id={self.client.user_id}, is_creator={self.is_creator}")  # 添加更详细的调试信息
         # 创建队列
         self.video_queue = asyncio.Queue(maxsize=3)
         self.screen_queue = asyncio.Queue(maxsize=2)
@@ -359,11 +374,12 @@ class ConferenceFrame(ttk.Frame):
         control_button_frame.grid(row=2, column=0, sticky="ew", padx=5, pady=5)
 
         control_button_frame.grid_columnconfigure(0, weight=1)
-        control_button_frame.grid_columnconfigure(1, weight=1)
+        if self.is_creator:
+            control_button_frame.grid_columnconfigure(1, weight=1)
     
         # 离开会议按钮 - 使用grid而不是pack
-        leave_button = ttk.Button(parent, text="离开会议", command=self.leave_conference_clicked)
-        leave_button.grid(row=2, column=0, sticky="ew", padx=5, pady=5)
+        leave_button = ttk.Button(control_button_frame, text="离开会议", command=self.leave_conference_clicked)
+        leave_button.grid(row=0, column=0, sticky="ew", padx=5)
         if self.is_creator:
             close_button = ttk.Button(control_button_frame, text="关闭会议", 
                                     command=self.close_conference_clicked)
