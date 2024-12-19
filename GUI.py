@@ -397,10 +397,12 @@ class ConferenceFrame(ttk.Frame):
             if 'data' in data and 'sender_id' in data:
                 sender_id = data['sender_id']
                 print(f"Received video from {sender_id}")
-                # 不处理自己发送的视频
-                if sender_id == self.client.sio.sid:
+                
+                # 使用视频通道的 socket ID 进行比较
+                if sender_id == self.client.sio.sid or sender_id==self.client.video_sio.sid or sender_id==self.client.screen_sio.sid:
+                    print("Skipping own video")
                     return
-
+                    
                 frame = decompress_image(data['data'])
                 # 更新视频显示
                 self.video_manager.update_video(sender_id, frame)
@@ -414,10 +416,15 @@ class ConferenceFrame(ttk.Frame):
                 sender_id = data['sender_id']
                 print(f"Received screen share from {sender_id}")
                 # 不处理自己发送的屏幕共享
-                if sender_id == self.client.sio.sid:
+                if sender_id == self.client.sio.sid or sender_id==self.client.video_sio.sid or sender_id==self.client.screen_sio.sid:
+                    print("Skipping own video")
                     return
 
                 screen = decompress_image(data['data'])
+                # 启动屏幕共享显示
+                if not self.video_manager.is_screen_sharing:
+                    self.video_manager.start_screen_share(sender_id)
+                # 更新屏幕共享内容
                 self.video_manager.update_screen_share(screen)
         except Exception as e:
             print(f"Error displaying received screen share: {e}")
@@ -611,42 +618,49 @@ class ConferenceFrame(ttk.Frame):
 
     def stop_video(self):
         """停止视频流"""
-        print("Stopping video stream...")
+        print("正在停止视频流...")
         self.is_sending_video = False
 
-        # 确保视频被正确停止并清理
-        if hasattr(self, 'video_manager'):
-            self.video_manager.remove_video('local')
-            # 然后设置视频状态为非活跃
-            self.video_manager.set_video_active('local', False)
-    
-        # 清空视频队列
-        while not self.video_queue.empty():
-            try:
-                self.video_queue.get_nowait()
-                self.video_queue.task_done()
-            except asyncio.QueueEmpty:
-                break
+        try:
+            # 确保视频被正确停止并清理
+            if hasattr(self, 'video_manager'):
+                # 停止本地视频显示
+                self.video_manager.set_video_active('local', False)
+                self.video_manager.remove_video('local')
+
+            # 清空视频队列
+            while not self.video_queue.empty():
+                try:
+                    self.video_queue.get_nowait()
+                    self.video_queue.task_done()
+                except asyncio.QueueEmpty:
+                    break
+        except Exception as e:
+            print(f"停止视频时出错: {e}")
 
     def stop_screen_share(self):
         """停止屏幕共享"""
-        print("Stopping screen share...")
+        print("正在停止屏幕共享...")
         self.is_sharing_screen = False
         
-        # 确保屏幕共享被正确停止并清理
-        if hasattr(self, 'video_manager'):
-            # 停止屏幕共享并更新UI
-            self.video_manager.stop_screen_share('local')
-            # 确保更新界面
-            self.video_manager.container.update_idletasks()
-        
-        # 清空屏幕共享队列
-        while not self.screen_queue.empty():
-            try:
-                self.screen_queue.get_nowait()
-                self.screen_queue.task_done()
-            except asyncio.QueueEmpty:
-                break
+        try:
+            # 确保屏幕共享被正确停止并清理
+            if hasattr(self, 'video_manager'):
+                # 停止屏幕共享并更新UI
+                self.video_manager.stop_screen_share('local')
+                
+                # 强制更新界面
+                self.video_manager.container.update_idletasks()
+            
+            # 清空屏幕共享队列
+            while not self.screen_queue.empty():
+                try:
+                    self.screen_queue.get_nowait()
+                    self.screen_queue.task_done()
+                except asyncio.QueueEmpty:
+                    break
+        except Exception as e:
+            print(f"停止屏幕共享时出错: {e}")
 
     # Queue Processing
     async def process_video_queue(self):
@@ -702,37 +716,32 @@ class ConferenceFrame(ttk.Frame):
 
     def cleanup(self):
         """清理所有资源"""
-        # 停止所有媒体流
-        self.stop_video()
-        self.stop_screen_share()
-        self.stop_audio()
-        
-        # 清理所有视频帧
-        if hasattr(self, 'video_manager'):
-            for participant_id in list(self.video_manager.video_frames.keys()):
-                self.video_manager.remove_video(participant_id)
-            
-        # 清空所有队列
-        while not self.video_queue.empty():
-            try:
-                self.video_queue.get_nowait()
-                self.video_queue.task_done()
-            except asyncio.QueueEmpty:
-                pass
-                
-        while not self.screen_queue.empty():
-            try:
-                self.screen_queue.get_nowait()
-                self.screen_queue.task_done()
-            except asyncio.QueueEmpty:
-                pass
-                
-        while not self.audio_queue.empty():
-            try:
-                self.audio_queue.get_nowait()
-                self.audio_queue.task_done()
-            except asyncio.QueueEmpty:
-                pass
+        try:
+            # 停止所有媒体流
+            self.stop_video()
+            self.stop_screen_share()
+            self.stop_audio()
+
+            # 清理所有视频帧
+            if hasattr(self, 'video_manager'):
+                # 先停止屏幕共享
+                if self.video_manager.is_screen_sharing:
+                    self.video_manager.stop_screen_share('local')
+
+                # 清理所有视频帧
+                for participant_id in list(self.video_manager.video_frames.keys()):
+                    self.video_manager.remove_video(participant_id)
+
+            # 清空所有队列
+            for queue in [self.video_queue, self.screen_queue, self.audio_queue]:
+                while not queue.empty():
+                    try:
+                        queue.get_nowait()
+                        queue.task_done()
+                    except asyncio.QueueEmpty:
+                        pass
+        except Exception as e:
+            print(f"清理资源时出错: {e}")
 if __name__ == "__main__":
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)

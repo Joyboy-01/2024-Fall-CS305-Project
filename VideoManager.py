@@ -80,23 +80,48 @@ class VideoGridManager:
     def remove_video(self, participant_id):
         """移除视频框"""
         if participant_id in self.video_frames:
-            self.video_frames[participant_id]['frame'].destroy()
-            del self.video_frames[participant_id]
-            self.container.update_idletasks()
-            self.update_layout()
-    
-    def set_video_active(self, participant_id, active):
-        """设置视频状态"""
-        if participant_id in self.video_frames:
-            self.video_frames[participant_id]['active'] = active
-            if not active:
-                # 显示黑屏
+            try:
+                # 清除图像
                 label = self.video_frames[participant_id]['label']
+                label.configure(image='')
+                label.image = None
+
+                # 显示黑色背景
                 black_img = Image.new('RGB', (self.default_video_width, self.default_video_height), color='black')
                 photo = ImageTk.PhotoImage(black_img)
                 label.configure(image=photo)
                 label.image = photo
-            self.update_layout()
+
+                # 销毁框架
+                self.video_frames[participant_id]['frame'].destroy()
+                del self.video_frames[participant_id]
+
+                # 更新布局
+                self.container.update_idletasks()
+                self.update_layout()
+            except Exception as e:
+                print(f"移除视频时出错: {e}")
+    
+    def set_video_active(self, participant_id, active):
+        """设置视频状态"""
+        if participant_id in self.video_frames:
+            try:
+                self.video_frames[participant_id]['active'] = active
+                if not active:
+                    # 清除现有图像
+                    label = self.video_frames[participant_id]['label']
+                    label.configure(image='')
+                    label.image = None
+                    
+                    # 显示黑色背景
+                    black_img = Image.new('RGB', (self.default_video_width, self.default_video_height), color='black')
+                    photo = ImageTk.PhotoImage(black_img)
+                    label.configure(image=photo)
+                    label.image = photo
+                    
+                self.update_layout()
+            except Exception as e:
+                print(f"设置视频状态时出错: {e}")
     
     def update_video(self, participant_id, image):
         """更新视频帧"""
@@ -139,77 +164,107 @@ class VideoGridManager:
         return True
     
     def update_screen_share(self, image):
-        """更新屏幕共享内容"""
-        if not self.is_screen_sharing:
-            print("Screen sharing is not active")
-            return False
+        """更新屏幕共享内容
 
+        Args:
+            image: PIL.Image 对象，要显示的屏幕共享图像
+
+        Returns:
+            bool: 更新是否成功
+        """
+        # 确保组件已初始化
         if not self.screen_share_frame or not self.screen_share_label:
-            print("Screen share components not initialized")
+            print("正在初始化屏幕共享组件...")
             self._init_screen_share_components()
-            
+
         try:
-            # 确保屏幕共享框架可见
-            if not self.screen_share_frame.winfo_viewable():
-                self.screen_share_frame.grid(row=0, column=0, sticky='nsew')
-                self.video_grid.grid_remove()
-            
+            # 确保显示屏幕共享框架
+            self.screen_share_frame.grid(row=0, column=0, sticky='nsew')
+            self.video_grid.grid_remove()
+
             # 获取容器的实际尺寸
             container_width = self.container.winfo_width() or self.container_width
             container_height = self.container.winfo_height() or self.container_height
-            
-            # 计算最佳显示尺寸，保持原始比例
-            w, h = image.size
-            aspect_ratio = w / h
-            
-            if container_width / container_height > aspect_ratio:
+
+            # 计算适合容器的图像尺寸，保持原始比例
+            orig_width, orig_height = image.size
+            aspect_ratio = orig_width / orig_height
+
+            # 根据容器比例决定缩放方式
+            container_ratio = container_width / container_height
+
+            if container_ratio > aspect_ratio:
+                # 以高度为基准缩放
                 new_height = container_height
                 new_width = int(container_height * aspect_ratio)
             else:
+                # 以宽度为基准缩放
                 new_width = container_width
                 new_height = int(container_width / aspect_ratio)
-            
-            # 调整图像大小
-            resized_image = image.resize((new_width, new_height), Image.Resampling.LANCZOS)
-            photo = ImageTk.PhotoImage(resized_image)
-            
-            # 更新标签图像
-            self.screen_share_label.configure(image=photo)
-            self.screen_share_label.image = photo  # 保持引用
-            
+
+            # 调整图像大小，使用高质量的重采样方法
+            try:
+                resized_image = image.resize((new_width, new_height), Image.Resampling.LANCZOS)
+            except Exception as e:
+                print(f"图像缩放失败: {e}")
+                # 如果LANCZOS失败，尝试使用BILINEAR
+                resized_image = image.resize((new_width, new_height), Image.Resampling.BILINEAR)
+
+            # 创建PhotoImage并更新标签
+            try:
+                photo = ImageTk.PhotoImage(resized_image)
+                self.screen_share_label.configure(image=photo)
+                self.screen_share_label.image = photo  # 保持引用防止垃圾回收
+            except Exception as e:
+                print(f"更新图像显示失败: {e}")
+                return False
+
+            # 设置共享状态为活跃
+            self.is_screen_sharing = True
+
             # 确保更新显示
             self.container.update_idletasks()
             return True
-            
+
         except Exception as e:
-            print(f"Error updating screen share: {e}")
+            print(f"屏幕共享更新失败: {e}")
+            import traceback
+            traceback.print_exc()  # 打印详细的错误堆栈
             return False
     
     def stop_screen_share(self, sharer_id):
         """停止屏幕共享"""
-        print(f"Stopping screen share for {sharer_id}")
+        print(f"正在停止 {sharer_id} 的屏幕共享")
         if self.screen_sharer_id != sharer_id:
-            print("Cannot stop screen share: wrong sharer")
+            print("无法停止屏幕共享：发送者ID不匹配")
             return False
-            
+
         try:
             self.is_screen_sharing = False
             self.screen_sharer_id = None
-            
+
             # 清理屏幕共享资源
             if self.screen_share_frame and self.screen_share_label:
+                # 清除图像
                 self.screen_share_label.configure(image='')
                 self.screen_share_label.image = None
+                # 隐藏屏幕共享框架
                 self.screen_share_frame.grid_remove()
-            
+
+                # 创建并显示黑色背景
+                black_img = Image.new('RGB', (self.default_video_width, self.default_video_height), color='black')
+                photo = ImageTk.PhotoImage(black_img)
+                self.screen_share_label.configure(image=photo)
+                self.screen_share_label.image = photo
+
             # 恢复视频网格
             self.video_grid.grid(row=0, column=0, sticky='nsew')
             self.update_layout()
-            print("Screen share stopped successfully")
+            print("屏幕共享已成功停止")
             return True
-            
+
         except Exception as e:
-            print(f"Error stopping screen share: {e}")
+            print(f"停止屏幕共享时出错: {e}")
             return False
 
     def update_layout(self):
