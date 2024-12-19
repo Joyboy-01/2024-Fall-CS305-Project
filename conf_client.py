@@ -29,7 +29,13 @@ class ConferenceClient:
             print(f"Received conference_created event: {data}")
             # 添加主动获取会议列表
             await self.sio.emit('get_conferences')
-
+        @self.sio.on('conference_closed')
+        async def on_conference_closed(data):
+            if self.conference and data['conference_id'] == self.conference.id:
+                print("Conference was closed by creator")
+                self.conference = None
+                if hasattr(self.master, 'on_conference_closed'):
+                    await self.master.on_conference_closed()
         @self.sio.on('conference_joined')
         async def on_conference_joined(data):
             print(f"Joined conference: {data}")
@@ -135,11 +141,13 @@ class ConferenceClient:
                 'data': audio_data
             })
     
+    # 在 conf_client.py 中
     async def send_video(self, video_data):
         if self.conference:
             await self.video_sio.emit('video', {
                 'conference_id': self.conference.id,
-                'data': video_data
+                'data': video_data['data'],
+                'participant_id': 'local'  # 添加发送者标识
             })
     
     async def send_screen_share(self, screen_data):
@@ -147,4 +155,10 @@ class ConferenceClient:
             await self.screen_sio.emit('screen_share', {
                 'conference_id': self.conference.id,
                 'data': screen_data
+            })
+    async def close_conference(self):
+        """关闭会议（仅创建者可用）"""
+        if self.conference:
+            await self.sio.emit('close_conference', {
+                'conference_id': self.conference.id
             })

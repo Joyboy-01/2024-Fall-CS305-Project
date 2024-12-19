@@ -1,4 +1,3 @@
-# conf_server.py
 from typing import Dict
 import uuid
 import socketio
@@ -80,6 +79,24 @@ async def on_join_conference(sid, data):
     else:
         await sio.emit('join_conference_failed', room=sid)
 
+@sio.on('close_conference')
+async def on_close_conference(sid, data):
+    conf_id = data['conference_id']
+    conf = conferences.get(conf_id)
+    
+    if conf and conf.creator_id == sid:
+        # 通知所有参与者会议已关闭
+        await sio.emit('conference_closed', 
+                      {'conference_id': conf_id}, 
+                      room=conf_id)
+        
+        # 清理会议资源
+        if conf_id in conferences:
+            # 让所有参与者离开会议房间
+            for participant_sid in conf.participants:
+                await sio.leave_room(participant_sid, conf_id)
+            del conferences[conf_id]
+
 @sio.on('leave_conference')
 async def on_leave_conference(sid, data):
     conf_id = data['conference_id']
@@ -88,14 +105,14 @@ async def on_leave_conference(sid, data):
     if conf and sid in conf.participants:
         client_name = conf.participants[sid]
         del conf.participants[sid]
-        await sio.leave_room(sid, conf_id)  # 添加 await
+        await sio.leave_room(sid, conf_id)
         await sio.emit('participant_left',
-                       {'conference_id': conf_id, 'client_id': sid, 'client_name': client_name},
-                       room=conf_id)
+                      {'conference_id': conf_id, 'client_id': sid, 'client_name': client_name},
+                      room=conf_id)
 
+        # 如果没有参与者了，删除会议
         if len(conf.participants) == 0:
             del conferences[conf_id]
-
 @sio.on('get_conferences')
 async def on_get_conferences(sid):
     print(f"Received get_conferences request from {sid}")
@@ -125,30 +142,13 @@ async def handle_audio(sid, data):
         # 广播给同一会议的其他参与者
         await sio.emit('audio', data, room=conf_id, skip_sid=sid)
 
+# 在 conf_server.py 中
 @sio.on('video')
 async def handle_video(sid, data):
     conf_id = data['conference_id']
     if conf_id in conferences:
-        await sio.emit('video', data, room=conf_id, skip_sid=sid)
-
-@sio.on('screen_share')
-async def handle_screen_share(sid, data):
-    conf_id = data['conference_id']
-    if conf_id in conferences:
-        await sio.emit('screen_share', data, room=conf_id, skip_sid=sid)
-
-
-@sio.on('audio')
-async def handle_audio(sid, data):
-    conf_id = data['conference_id']
-    if conf_id in conferences:
-        # 广播给同一会议的其他参与者
-        await sio.emit('audio', data, room=conf_id, skip_sid=sid)
-
-@sio.on('video')
-async def handle_video(sid, data):
-    conf_id = data['conference_id']
-    if conf_id in conferences:
+        # 在转发时包含发送者信息
+        data['participant_id'] = sid
         await sio.emit('video', data, room=conf_id, skip_sid=sid)
 
 @sio.on('screen_share')
