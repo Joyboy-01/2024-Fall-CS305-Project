@@ -33,6 +33,22 @@ class VideoGridManager:
         self.video_grid = ttk.Frame(self.container)
         self.video_grid.grid(row=0, column=0, sticky='nsew')
         
+        # 初始化屏幕共享组件
+        self._init_screen_share_components()
+
+    def _init_screen_share_components(self):
+        """初始化屏幕共享组件"""
+        if not self.screen_share_frame:
+            self.screen_share_frame = ttk.Frame(self.container)
+            self.screen_share_frame.grid(row=0, column=0, sticky='nsew')
+            self.screen_share_frame.grid_remove()  # 初始时隐藏
+            
+            self.screen_share_label = ttk.Label(self.screen_share_frame)
+            self.screen_share_label.grid(row=0, column=0, sticky='nsew')
+            
+            self.screen_share_frame.grid_columnconfigure(0, weight=1)
+            self.screen_share_frame.grid_rowconfigure(0, weight=1)
+
     def add_video(self, participant_id, initial_image=None):
         """添加新的视频框"""
         if participant_id in self.video_frames:
@@ -107,43 +123,42 @@ class VideoGridManager:
         if self.is_screen_sharing and self.screen_sharer_id != sharer_id:
             print("Another user is already sharing screen")
             return False
-            
+        
+        # 确保组件已初始化
+        self._init_screen_share_components()
+        
         self.is_screen_sharing = True
         self.screen_sharer_id = sharer_id
         
-        if not self.screen_share_frame:
-            # 创建屏幕共享框架
-            print("Creating new screen share frame")
-            self.screen_share_frame = ttk.Frame(self.container)
-            self.screen_share_frame.grid(row=0, column=0, sticky='nsew')
-            
-            # 创建标签
-            self.screen_share_label = ttk.Label(self.screen_share_frame)
-            self.screen_share_label.grid(row=0, column=0, sticky='nsew')
-            
-            # 配置网格权重
-            self.screen_share_frame.grid_columnconfigure(0, weight=1)
-            self.screen_share_frame.grid_rowconfigure(0, weight=1)
-        
-        # 确保屏幕共享框架可见，视频网格隐藏
-        self.screen_share_frame.grid(row=0, column=0, sticky='nsew')
-        self.video_grid.grid_remove()
+        # 显示屏幕共享框架
+        if self.screen_share_frame:
+            self.screen_share_frame.grid()
+            self.video_grid.grid_remove()
         
         print("Screen share started successfully")
         return True
     
     def update_screen_share(self, image):
         """更新屏幕共享内容"""
-        if not self.is_screen_sharing or not self.screen_share_frame:
-            print("Cannot update screen share: not active or no frame")
-            return
+        if not self.is_screen_sharing:
+            print("Screen sharing is not active")
+            return False
+
+        if not self.screen_share_frame or not self.screen_share_label:
+            print("Screen share components not initialized")
+            self._init_screen_share_components()
             
         try:
+            # 确保屏幕共享框架可见
+            if not self.screen_share_frame.winfo_viewable():
+                self.screen_share_frame.grid(row=0, column=0, sticky='nsew')
+                self.video_grid.grid_remove()
+            
             # 获取容器的实际尺寸
             container_width = self.container.winfo_width() or self.container_width
             container_height = self.container.winfo_height() or self.container_height
             
-            # 计算最佳显示尺寸
+            # 计算最佳显示尺寸，保持原始比例
             w, h = image.size
             aspect_ratio = w / h
             
@@ -159,29 +174,32 @@ class VideoGridManager:
             photo = ImageTk.PhotoImage(resized_image)
             
             # 更新标签图像
-            if self.screen_share_label:
-                self.screen_share_label.configure(image=photo)
-                self.screen_share_label.image = photo
+            self.screen_share_label.configure(image=photo)
+            self.screen_share_label.image = photo  # 保持引用
             
-            # 确保屏幕共享框架可见
-            self.screen_share_frame.grid(row=0, column=0, sticky='nsew')
-            self.video_grid.grid_remove()
+            # 确保更新显示
+            self.container.update_idletasks()
+            return True
             
         except Exception as e:
             print(f"Error updating screen share: {e}")
+            return False
     
     def stop_screen_share(self, sharer_id):
         """停止屏幕共享"""
         print(f"Stopping screen share for {sharer_id}")
-        if self.screen_sharer_id == sharer_id:
+        if self.screen_sharer_id != sharer_id:
+            print("Cannot stop screen share: wrong sharer")
+            return False
+            
+        try:
             self.is_screen_sharing = False
             self.screen_sharer_id = None
             
             # 清理屏幕共享资源
-            if self.screen_share_frame:
-                if self.screen_share_label:
-                    self.screen_share_label.configure(image='')
-                    self.screen_share_label.image = None
+            if self.screen_share_frame and self.screen_share_label:
+                self.screen_share_label.configure(image='')
+                self.screen_share_label.image = None
                 self.screen_share_frame.grid_remove()
             
             # 恢复视频网格
@@ -190,9 +208,10 @@ class VideoGridManager:
             print("Screen share stopped successfully")
             return True
             
-        print("Cannot stop screen share: wrong sharer")
-        return False
-    
+        except Exception as e:
+            print(f"Error stopping screen share: {e}")
+            return False
+
     def update_layout(self):
         """更新视频网格布局"""
         if self.is_screen_sharing:
