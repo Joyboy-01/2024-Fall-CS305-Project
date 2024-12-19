@@ -403,6 +403,7 @@ class ConferenceFrame(ttk.Frame):
     async def on_video_received(self, data):
         """处理接收到的视频"""
         try:
+            print("Received video")
             if 'data' in data and 'user_id' in data:
                 user_id = data['user_id']
                 print(f"Received video from user {user_id}")
@@ -420,6 +421,7 @@ class ConferenceFrame(ttk.Frame):
     async def on_screen_share_received(self, data):
         """处理接收到的屏幕共享"""
         try:
+            print("Received screen share")
             if 'data' in data and 'user_id' in data:
                 user_id = data['user_id']
                 print(f"Received screen share from user {user_id}")

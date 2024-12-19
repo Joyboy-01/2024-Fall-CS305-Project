@@ -1,16 +1,4 @@
 现在有以下几个问题：
-
-关闭按钮
-
-正在停止屏幕共享...
-Stopping screen share for local
-Screen share stopped successfully
-Stopping screen share for local
-Cannot stop screen share: wrong sharer
-连续四个
-
-
-
 创建之后立即进入会议
 创造者没有关闭会议按钮
 

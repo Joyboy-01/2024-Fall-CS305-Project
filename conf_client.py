@@ -184,7 +184,7 @@ class ConferenceClient:
             await self.video_sio.emit('video', {
                 'conference_id': self.conference.id,
                 'data': video_data['data'] if isinstance(video_data, dict) else video_data,
-                'user_id': self.user_id  # 确保使用user_id而不是socket id
+                'user_id': self.user_id
             })
 
     async def send_screen_share(self, screen_data):
@@ -193,7 +193,7 @@ class ConferenceClient:
             await self.screen_sio.emit('screen_share', {
                 'conference_id': self.conference.id,
                 'data': screen_data['data'] if isinstance(screen_data, dict) else screen_data,
-                'user_id': self.user_id  # 确保使用user_id而不是socket id
+                'user_id': self.user_id
             })
 
     async def send_audio(self, audio_data):

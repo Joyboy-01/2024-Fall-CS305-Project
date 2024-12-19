@@ -239,39 +239,39 @@ class VideoGridManager:
             traceback.print_exc()  # 打印详细的错误堆栈
             return False
     
-    # def stop_screen_share(self, sharer_id):
-    #     """停止屏幕共享"""
-    #     print(f"Stopping screen share for {sharer_id}")
-    #     if self.screen_sharer_id != sharer_id:
-    #         print("Cannot stop screen share: wrong sharer")
-    #         return False
+    def stop_screen_share(self, sharer_id):
+        """停止屏幕共享"""
+        print(f"Stopping screen share for {sharer_id}")
+        if self.screen_sharer_id != sharer_id:
+            print("Cannot stop screen share: wrong sharer")
+            return False
 
-    #     try:
-    #         # 清理资源
-    #         if self.screen_share_label:
-    #             self.screen_share_label.configure(image='')
-    #             self.screen_share_label.image = None
+        try:
+            # 清理资源
+            if self.screen_share_label:
+                self.screen_share_label.configure(image='')
+                self.screen_share_label.image = None
 
-    #         # 隐藏屏幕共享框架
-    #         if self.screen_share_frame:
-    #             self.screen_share_frame.grid_remove()
+            # 隐藏屏幕共享框架
+            if self.screen_share_frame:
+                self.screen_share_frame.grid_remove()
 
-    #         # 恢复视频网格
-    #         self.video_grid.grid(row=0, column=0, sticky='nsew')
+            # 恢复视频网格
+            self.video_grid.grid(row=0, column=0, sticky='nsew')
 
-    #         # 重置状态
-    #         self.is_screen_sharing = False
-    #         self.screen_sharer_id = None
+            # 重置状态
+            self.is_screen_sharing = False
+            self.screen_sharer_id = None
 
-    #         self.update_layout()
-    #         print("Screen share stopped successfully")
-    #         return True
-    #     except Exception as e:
-    #         print(f"Error stopping screen share: {e}")
-    #         # 确保状态被重置
-    #         self.is_screen_sharing = False
-    #         self.screen_sharer_id = None
-    #         return False
+            self.update_layout()
+            print("Screen share stopped successfully")
+            return True
+        except Exception as e:
+            print(f"Error stopping screen share: {e}")
+            # 确保状态被重置
+            self.is_screen_sharing = False
+            self.screen_sharer_id = None
+            return False
 
     def update_layout(self):
         """更新视频网格布局"""
