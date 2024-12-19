@@ -3,6 +3,7 @@ import uuid
 import socketio
 from aiohttp import web
 from protocol import Conference
+from AudioMixer import AudioMixer
 
 # 创建三个不同的socket服务器
 sio = socketio.AsyncServer(async_mode='aiohttp', ping_timeout=3, ping_interval=25)
@@ -19,6 +20,7 @@ screen_sio.attach(app, socketio_path='screen/socket.io')
 conferences: Dict[str, Conference] = {}
 user_connections = {}  # {user_id: {'main': sid, 'video': sid, 'screen': sid}}
 
+audio_mixers = {}
 # 连接事件处理
 @sio.event
 async def connect(sid, environ):
@@ -153,7 +155,10 @@ async def on_leave_conference(sid, data):
 
     conf_id = data['conference_id']
     conf = conferences.get(conf_id)
-    
+
+    if conf_id in audio_mixers:
+        audio_mixers[conf_id].remove_audio_stream(user_id)
+
     if conf and user_id in conf.participants:
         client_name = conf.participants[user_id]
         del conf.participants[user_id]
@@ -191,6 +196,8 @@ async def on_close_conference(sid, data):
         
         # 清理会议资源
         if conf_id in conferences:
+            if conf_id in audio_mixers:
+                del audio_mixers[conf_id]
             # 让所有参与者离开会议房间
             for participant_user_id in conf.participants:
                 participant_sid = user_connections.get(participant_user_id, {}).get('main')
@@ -271,17 +278,29 @@ async def handle_screen_share(sid, data):
 
 @sio.on('audio')
 async def handle_audio(sid, data):
+    """处理接收到的音频数据"""
     try:
         conf_id = data['conference_id']
         user_id = data['user_id']
-        if conf_id in conferences and user_id:
-            await sio.emit('audio', {
-                'conference_id': conf_id,
-                'data': data['data'],
-                'user_id': user_id
-            }, room=conf_id, skip_sid=sid)
+        
+        # 确保会议存在音频混音器
+        if conf_id not in audio_mixers:
+            audio_mixers[conf_id] = AudioMixer()
+            
+        # 添加音频流到混音器
+        audio_mixers[conf_id].add_audio_stream(user_id, data['data'])
+        
+        # 混合音频
+        mixed_audio = audio_mixers[conf_id].mix_audio()
+        
+        # 广播混合后的音频给所有参与者
+        await sio.emit('audio', {
+            'conference_id': conf_id,
+            'data': mixed_audio,
+            'mixed': True  # 标记这是混合后的音频
+        }, room=conf_id, skip_sid=sid)
     except Exception as e:
-        print(f"Error broadcasting audio: {e}")
+        print(f"Error handling audio: {e}")
 
 # 添加视频关闭事件处理
 @video_sio.on('video_stopped')

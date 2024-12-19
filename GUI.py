@@ -76,13 +76,6 @@ class ConferenceGUI(tk.Tk):
         # 停止事件循环并销毁GUI
         self.loop.stop()
         self.destroy()
-    async def on_conference_closed(self):
-        """当会议被创建者关闭时的处理"""
-        message_box = tk.messagebox.showinfo(
-            "会议已关闭",
-            "会议已被创建者关闭"
-        )
-        self.switch_frame(ConferenceListFrame)
 class LoginFrame(ttk.Frame):
     def __init__(self, master, client):
         super().__init__(master)
@@ -168,7 +161,7 @@ class ConferenceListFrame(ttk.Frame):
 
     async def _create_conference(self, conf_name):
         await self.client.create_conference(conf_name, self.client.username)
-        await asyncio.sleep(0.1)
+        await asyncio.sleep(0.3)
         conferences = await self.client.get_conferences()
         
         # 找到刚刚创建的会议
@@ -283,6 +276,13 @@ class ConferenceFrame(ttk.Frame):
 
         self.video_manager = VideoGridManager(self)
 
+         # 音频处理相关的属性
+        self.audio_buffer = []
+        self.is_sending_audio = False
+        self.audio_chunk_size = 1024
+        self.audio_queue = asyncio.Queue(maxsize=10)
+
+
         # 设置事件处理和创建布局
         self.setup_event_handlers()
         self.create_layout()
@@ -395,6 +395,7 @@ class ConferenceFrame(ttk.Frame):
         self.client.video_sio.on('video_stopped', self.on_video_stopped)
         self.client.screen_sio.on('screen_share_stopped', self.on_screen_share_stopped)
 
+        self.client.sio.on('conference_closed', self.on_conference_closed)
     def start_processing_tasks(self):
         """启动异步处理任务"""
         self.master.loop.create_task(self.process_video_queue())
@@ -404,16 +405,15 @@ class ConferenceFrame(ttk.Frame):
     async def on_audio_received(self, data):
         """处理接收到的音频"""
         try:
-            if 'data' in data and 'user_id' in data:
-                user_id = data['user_id']
-                print(f"Received screen share from user {user_id}")
-                
-                # 使用user_id进行比较
-                if user_id == self.client.user_id:
-                    print("Skipping own audio")
-                    return
-        
-                streamout.write(data['data'])
+            if 'data' in data:
+                # 检查是否是混合音频
+                if data.get('mixed', False):
+                    # 直接播放混合后的音频
+                    streamout.write(data['data'])
+                else:
+                    # 如果不是混合音频，跳过自己发送的音频
+                    if data.get('user_id') != self.client.user_id:
+                        streamout.write(data['data'])
         except Exception as e:
             print(f"Error playing received audio: {e}")
 
@@ -489,6 +489,15 @@ class ConferenceFrame(ttk.Frame):
         message = data['message']
         self.insert_message(f"{sender}: {message}")
 
+    async def on_conference_closed(self, data):
+            """处理会议被关闭的事件"""
+            if self.conference and data['conference_id'] == self.conference.id:
+                # 停止所有媒体流
+                self.cleanup()
+                # 切换回会议列表界面
+                self.master.switch_frame(ConferenceListFrame)
+                # 显示提示消息
+                tk.messagebox.showinfo("会议已关闭", "会议已被创建者关闭")
     # UI Updates
     def update_participant_list(self):
         """更新参与者列表"""
@@ -586,17 +595,19 @@ class ConferenceFrame(ttk.Frame):
         """开始音频流"""
         print("Starting audio stream...")
         self.is_sending_audio = True
+        
         while self.is_sending_audio:
             try:
+                # 捕获音频数据
                 audio_data = capture_voice()
                 if audio_data and not self.audio_queue.full():
+                    # 将音频数据放入队列
                     await self.audio_queue.put(audio_data)
-                await asyncio.sleep(0.02)
-            except asyncio.QueueFull:
-                pass
+                await asyncio.sleep(0.01)  # 降低CPU使用率
             except Exception as e:
-                print(f"Error in audio streaming: {e}")
-                self.is_sending_audio = False   
+                print(f"Error capturing audio: {e}")
+                self.is_sending_audio = False
+                break  
 
     async def start_video(self):
         """优化后的视频流"""
@@ -652,6 +663,13 @@ class ConferenceFrame(ttk.Frame):
         """停止音频流"""
         print("Stopping audio stream...")
         self.is_sending_audio = False
+        # 清空音频队列
+        while not self.audio_queue.empty():
+            try:
+                self.audio_queue.get_nowait()
+                self.audio_queue.task_done()
+            except asyncio.QueueEmpty:
+                break
 
     def stop_video(self):
         """停止视频流"""
@@ -762,10 +780,12 @@ class ConferenceFrame(ttk.Frame):
         """处理音频队列"""
         while True:
             try:
-                data = await self.audio_queue.get()
-                if data is not None:
-                    await self.client.send_audio(data)
-                await asyncio.sleep(0.02)
+                # 从队列获取音频数据
+                audio_data = await self.audio_queue.get()
+                if audio_data is not None:
+                    # 发送到服务器
+                    await self.client.send_audio(audio_data)
+                await asyncio.sleep(0.01)
             except Exception as e:
                 print(f"Error processing audio: {e}")
             finally:
