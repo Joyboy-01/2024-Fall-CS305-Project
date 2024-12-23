@@ -282,7 +282,11 @@ async def handle_audio(sid, data):
     try:
         conf_id = data['conference_id']
         user_id = data['user_id']
-        
+        if not user_id or conf_id not in conferences:
+            return
+            
+        # 获取用户的screen socket id
+        audio_sid = user_connections.get(user_id, {}).get('audio')
         # 确保会议存在音频混音器
         if conf_id not in audio_mixers:
             audio_mixers[conf_id] = AudioMixer()
@@ -292,13 +296,14 @@ async def handle_audio(sid, data):
         
         # 混合音频
         mixed_audio = audio_mixers[conf_id].mix_audio()
-        
+        print(f"Mixed audio of {len(mixed_audio)} bytes")
         # 广播混合后的音频给所有参与者
         await sio.emit('audio', {
             'conference_id': conf_id,
             'data': mixed_audio,
+            'user_id': user_id,
             'mixed': True  # 标记这是混合后的音频
-        }, room=conf_id, skip_sid=sid)
+        }, room=conf_id, skip_sid=audio_sid)
     except Exception as e:
         print(f"Error handling audio: {e}")
 
@@ -337,4 +342,4 @@ async def handle_screen_share_stopped(sid, data):
         print(f"Error broadcasting screen share stop: {e}")
         
 if __name__ == '__main__':
-    web.run_app(app, host='127.0.0.1', port=8888)
+    web.run_app(app, host='10.28.94.9', port=8888)

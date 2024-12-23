@@ -394,7 +394,6 @@ class ConferenceFrame(ttk.Frame):
         self.client.sio.on('message_received', self.on_message_received)
         self.client.video_sio.on('video_stopped', self.on_video_stopped)
         self.client.screen_sio.on('screen_share_stopped', self.on_screen_share_stopped)
-
         self.client.sio.on('conference_closed', self.on_conference_closed)
     def start_processing_tasks(self):
         """启动异步处理任务"""
@@ -405,15 +404,18 @@ class ConferenceFrame(ttk.Frame):
     async def on_audio_received(self, data):
         """处理接收到的音频"""
         try:
-            if 'data' in data:
+            if 'data' in data and 'user_id' in data:
+                user_id = data['user_id']
                 # 检查是否是混合音频
                 if data.get('mixed', False):
                     # 直接播放混合后的音频
                     streamout.write(data['data'])
+                    print(f"Received mixed audio from {user_id}")
                 else:
                     # 如果不是混合音频，跳过自己发送的音频
-                    if data.get('user_id') != self.client.user_id:
+                    if user_id == self.client.user_id:
                         streamout.write(data['data'])
+                        print(f"Received audio from {user_id}")
         except Exception as e:
             print(f"Error playing received audio: {e}")
 
@@ -603,6 +605,7 @@ class ConferenceFrame(ttk.Frame):
                 if audio_data and not self.audio_queue.full():
                     # 将音频数据放入队列
                     await self.audio_queue.put(audio_data)
+                    print("Put audio data into queue")
                 await asyncio.sleep(0.01)  # 降低CPU使用率
             except Exception as e:
                 print(f"Error capturing audio: {e}")
@@ -834,7 +837,7 @@ if __name__ == "__main__":
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
 
-    gui = ConferenceGUI(server_url="http://127.0.0.1:8888", loop=loop)
+    gui = ConferenceGUI(server_url="http://10.28.94.9:8888", loop=loop)
     try:
         gui.mainloop()
     finally:
