@@ -113,6 +113,8 @@ def capture_camera():
     ret, frame = cap.read()
     if not ret:
         raise Exception('Fail to capture frame from camera')
+    # 转换 BGR 到 RGB 格式
+    frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
     return Image.fromarray(frame)
 
 
