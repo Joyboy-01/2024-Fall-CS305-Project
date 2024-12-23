@@ -267,7 +267,7 @@ class ConferenceFrame(ttk.Frame):
         self.is_sending_video = False
         self.is_sharing_screen = False
         self.frame_interval = 1/15  # 30 FPS
-        self.video_quality = 60
+        self.video_quality = 50
         self.is_creator = self.conference.creator_id == self.client.user_id  # 使用 user_id 而不是 sio.sid
         print(f"Creator check: conference creator_id={self.conference.creator_id}, client user_id={self.client.user_id}, is_creator={self.is_creator}")  # 添加更详细的调试信息
         # 创建队列
@@ -652,7 +652,7 @@ class ConferenceFrame(ttk.Frame):
                     # 将音频数据放入队列
                     await self.audio_queue.put(audio_data)
                     print("Put audio data into queue")
-                await asyncio.sleep(0.05)  # 降低CPU使用率
+                await asyncio.sleep(0.0001)  # 降低CPU使用率
             except Exception as e:
                 print(f"Error capturing audio: {e}")
                 self.is_sending_audio = False
@@ -694,7 +694,7 @@ class ConferenceFrame(ttk.Frame):
             try:
                 screen = resize_image_to_fit_screen(capture_screen())
                 if screen and not self.screen_queue.full():
-                    compressed_screen = compress_image(screen, quality=70)  # 降低一点质量以减少数据量
+                    compressed_screen = compress_image(screen, quality=50)  # 降低一点质量以减少数据量
                     screen_data = {
                         'data': compressed_screen,
                         'participant_id': self.client.sio.sid
@@ -812,7 +812,7 @@ class ConferenceFrame(ttk.Frame):
                 video_data = await self.video_queue.get()
                 if video_data is not None:
                     await self.client.send_video(video_data)
-                await asyncio.sleep(0.01)
+                await asyncio.sleep(0.001)
             except Exception as e:
                 print(f"Error processing video: {e}")
             finally:
@@ -841,7 +841,7 @@ class ConferenceFrame(ttk.Frame):
                 if audio_data is not None:
                     # 发送到服务器
                     await self.client.send_audio(audio_data)
-                await asyncio.sleep(0.01)
+                await asyncio.sleep(0.0001)
             except Exception as e:
                 print(f"Error processing audio: {e}")
             finally:
