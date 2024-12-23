@@ -4,7 +4,7 @@ import socketio
 from aiohttp import web
 from protocol import Conference
 from AudioMixer import AudioMixer
-
+import logging
 # 创建三个不同的socket服务器
 sio = socketio.AsyncServer(async_mode='aiohttp', ping_timeout=3, ping_interval=25)
 video_sio = socketio.AsyncServer(async_mode='aiohttp', ping_timeout=3, ping_interval=25)
@@ -101,7 +101,8 @@ async def on_create_conference(sid, data):
         id=str(uuid.uuid4()),
         name=data['name'],
         creator_id=user_id,
-        participants={user_id: data['username']}
+        participants={user_id: data['username']},
+        mode="CS"
     )
     conferences[new_conf.id] = new_conf
     await sio.enter_room(sid, new_conf.id)
@@ -143,6 +144,13 @@ async def on_join_conference(sid, data):
             'user_id': user_id,
             'client_name': username
         }, room=conf_id, skip_sid=sid)
+
+        if len(conf.participants) == 2:
+            # 触发P2P模式
+            await sio.emit('mode_change', {'mode': 'P2P', 'target_sid': sid, 'conference_id': conf_id}, room=conf_id, skip_sid=sid)
+        elif len(conf.participants) > 2:
+            # 切回CS模式
+            await sio.emit('mode_change', {'mode': 'CS'}, room=conf_id)
     else:
         await sio.emit('join_conference_failed', room=sid)
 
@@ -170,7 +178,18 @@ async def on_leave_conference(sid, data):
             'user_id': user_id,
             'client_name': client_name
         }, room=conf_id)
-
+        if len(conf.participants) == 2:
+            target_sid = list(conf.participants.values())[0]
+            print("switch to p2p mode")
+            print(target_sid)
+            await sio.emit('mode_change',
+                           {'mode': 'P2P',
+                            'target_sid': target_sid,
+                            'conference_id': conf_id},
+                           room=conf_id)
+        elif len(conf.participants) == 1:
+            print("switch to cs mode")
+            await sio.emit('mode_change', {'mode': 'CS'}, room=conf_id)
         # 如果房间为空，立即删除会议
         if not conf.participants:
             if conf_id in conferences:
@@ -258,13 +277,17 @@ async def handle_video(sid, data):
 @screen_sio.on('screen_share')
 async def handle_screen_share(sid, data):
     try:
+
         user_id = data.get('user_id')
         conf_id = data['conference_id']
         if not user_id or conf_id not in conferences:
             return
             
         # 获取用户的screen socket id
+        print(user_connections)
+        print(user_connections.get(user_id, {}))
         screen_sid = user_connections.get(user_id, {}).get('screen')
+        print(screen_sid)
         if screen_sid:
             print(f"Broadcasting screen share from user {user_id}")
             await screen_sio.emit('screen_share', {
@@ -335,6 +358,39 @@ async def handle_screen_share_stopped(sid, data):
         }, room=conf_id, skip_sid=sid)
     except Exception as e:
         print(f"Error broadcasting screen share stop: {e}")
-        
+
+
+
+
+
+peer_connections = {}
+
+@sio.on('p2p_offer')
+async def handle_p2p_offer(sid, data):
+    target_sid = data['target_sid']
+    offer = data['offer']
+    conf_id = data['conference_id']
+    # 转发Offer到目标客户端
+    await sio.emit('p2p_offer', {'source_sid': sid, 'offer': offer, "conference_id": conf_id}, room=conf_id, skip_sid=sid)
+
+
+@sio.on('p2p_answer')
+async def handle_p2p_answer(sid, data):
+    target_sid = data['target_sid']
+    answer = data['answer']
+    conf_id = data['conference_id']
+    # 转发Answer到目标客户端
+    await sio.emit('p2p_answer', {'source_sid': sid, 'answer': answer}, room=conf_id, skip_sid=sid)
+
+
+@sio.on('ice_candidate')
+async def handle_p2p_ice_candidate(sid, data):
+    conf_id = data["conference_id"]
+    candidate = data['candidate']
+    print("ice received!!!")
+    # 转发ICE候选到目标客户端
+    await sio.emit('ice_candidate', {'source_sid': sid, 'candidate': candidate}, room=conf_id, skip_sid=sid)
+
+
 if __name__ == '__main__':
     web.run_app(app, host='127.0.0.1', port=8888)

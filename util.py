@@ -30,7 +30,7 @@ else:
 my_screen_size = pyautogui.size()
 
 
-def resize_image_to_fit_screen(image, my_screen_size):
+def resize_image_to_fit_screen(image, my_screen_size=(320, 240)):
     screen_width, screen_height = my_screen_size
 
     original_width, original_height = image.size

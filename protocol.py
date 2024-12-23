@@ -6,9 +6,9 @@ class Conference:
     id: str
     name: str    
     creator_id: str
+    mode: str
     participants: Dict[str, str]  # client_id: client_name
     max_participants: int = 10
-    
     def to_dict(self) -> Dict[str, Any]:
         return self.__dict__
 
