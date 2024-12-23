@@ -279,8 +279,8 @@ class ConferenceFrame(ttk.Frame):
          # 音频处理相关的属性
         self.audio_buffer = []
         self.is_sending_audio = False
-        self.audio_chunk_size = 1024
-        self.audio_queue = asyncio.Queue(maxsize=10)
+        # self.audio_chunk_size = 1024
+        # self.audio_queue = asyncio.Queue(maxsize=10)
 
 
         # 设置事件处理和创建布局
@@ -404,6 +404,10 @@ class ConferenceFrame(ttk.Frame):
     async def on_audio_received(self, data):
         """处理接收到的音频"""
         try:
+            
+            if data['conference_id'] != self.conference.id:
+                print("Received screen share from different conference")
+                return
             if 'data' in data and 'user_id' in data:
                 user_id = data['user_id']
                 # 检查是否是混合音频
@@ -422,6 +426,10 @@ class ConferenceFrame(ttk.Frame):
     async def on_video_received(self, data):
         """处理接收到的视频"""
         try:
+            
+            if data['conference_id'] != self.conference.id:
+                print("Received screen share from different conference")
+                return
             print("Received video")
             if 'data' in data and 'user_id' in data:
                 user_id = data['user_id']
@@ -441,6 +449,10 @@ class ConferenceFrame(ttk.Frame):
         """处理接收到的屏幕共享"""
         try:
             print("Received screen share")
+            
+            if data['conference_id'] != self.conference.id:
+                print("Received screen share from different conference")
+                return
             if 'data' in data and 'user_id' in data:
                 user_id = data['user_id']
                 print(f"Received screen share from user {user_id}")
@@ -606,7 +618,7 @@ class ConferenceFrame(ttk.Frame):
                     # 将音频数据放入队列
                     await self.audio_queue.put(audio_data)
                     print("Put audio data into queue")
-                await asyncio.sleep(0.01)  # 降低CPU使用率
+                await asyncio.sleep(0.05)  # 降低CPU使用率
             except Exception as e:
                 print(f"Error capturing audio: {e}")
                 self.is_sending_audio = False
@@ -773,7 +785,7 @@ class ConferenceFrame(ttk.Frame):
                 if screen_data is not None:
                     print(f"Sending screen share, queue size: {self.screen_queue.qsize()}")
                     await self.client.send_screen_share(screen_data)
-                await asyncio.sleep(0.05)
+                await asyncio.sleep(0.001)
             except Exception as e:
                 print(f"Error processing screen share: {e}")
             finally:
@@ -837,7 +849,7 @@ if __name__ == "__main__":
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
 
-    gui = ConferenceGUI(server_url="http://10.28.94.9:8888", loop=loop)
+    gui = ConferenceGUI(server_url="http://192.168.0.140:8888", loop=loop)
     try:
         gui.mainloop()
     finally:

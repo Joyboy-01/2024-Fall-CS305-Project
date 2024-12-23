@@ -285,8 +285,7 @@ async def handle_audio(sid, data):
         if not user_id or conf_id not in conferences:
             return
             
-        # 获取用户的screen socket id
-        audio_sid = user_connections.get(user_id, {}).get('audio')
+        audio_sid = user_connections.get(user_id, {}).get('main')
         # 确保会议存在音频混音器
         if conf_id not in audio_mixers:
             audio_mixers[conf_id] = AudioMixer()
